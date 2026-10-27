@@ -5,7 +5,7 @@ Basically it's a scrolling screensaver implemented in Python using PySide6.
 # Working Features
 
 - Scroll speed can be adjusted
-- Assets can be loaded from custom directories
+- Assets can be loaded from directories dynamically
 - Ability to extend the Tile class to include more complicated scenes
 
 # Future Features
