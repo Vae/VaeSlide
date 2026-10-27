@@ -1,4 +1,4 @@
-assets_secret
+secret*
 dist
 .venv
 .idea

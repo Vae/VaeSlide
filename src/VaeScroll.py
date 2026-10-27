@@ -60,7 +60,7 @@ class EndlessScrollWidget(QWidget):
 
         # Setup
         # self._assets = self._load_assets(["assets"])
-        self._load_assets()
+        self.load_assets("assets")
         self._configure_window()
         self._seed_tiles()
 
@@ -77,9 +77,9 @@ class EndlessScrollWidget(QWidget):
     # ------------------------------------------------------------------
     # Image loading
     # ------------------------------------------------------------------
-    def _load_assets(self) -> None:
+    def load_assets(self, path: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
-        assets_dir = "assets"
+        assets_dir = path
         if not os.path.isdir(assets_dir):
             logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", assets_dir)
             return
@@ -269,7 +269,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
                         help="Run in a window instead of fullscreen (for testing)")
-    parser.add_argument("--speed", type=float, default=0.5,
+    parser.add_argument("--speed", type=float, default=1.5,
                         help="Scroll speed in pixels per frame (default: 1.2)")
     args = parser.parse_args()
 
@@ -286,6 +286,7 @@ def main() -> None:
     app.setQuitOnLastWindowClosed(True)
 
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
+    widget.load_assets("secret_assets")
     widget.show()
 
     print("Screensaver running; click / press any key to exit.")
