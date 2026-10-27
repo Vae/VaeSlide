@@ -1,0 +1,11 @@
+{
+    "weight": 3,
+    "children": [
+        {
+            "image": "sub images/sub-002.png",
+            "x": 1600,
+            "y": 100,
+            "weight": 50
+        }
+    ]
+}

@@ -1,0 +1,19 @@
+{
+    "weight": 3,
+    "overlay": {
+        "subimages": [
+            {
+            "image": "sub images/sub-000.png",
+            "x": 1600,
+            "y": 100,
+            "weight": 50
+            },
+            {
+                "image": "sub images/sub-001.png",
+                "x": 400,
+                "y": 300,
+                "weight": 20
+            }
+        ]
+    }
+}
