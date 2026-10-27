@@ -53,7 +53,6 @@ class EndlessScrollWidget(QWidget):
 
         #two containers, same content. Combine?
         self._meta_tiles: List[MetaTile] = []
-        self._weights: dict = {}
 
         # Background colour visible in gaps (if any)
         self._bg_color = QColor("#0a0a0a")
@@ -112,7 +111,6 @@ class EndlessScrollWidget(QWidget):
 
             metaTile = MetaTile(weight=weight, json_filename=json_path, image_filename=png_path, width=width, height=height)
             self._meta_tiles.append(metaTile)
-            self._weights[png_path] = weight
 
         if not self._meta_tiles:
             logging.error("No valid assets loaded. A black screen will be displayed.")
@@ -162,7 +160,6 @@ class EndlessScrollWidget(QWidget):
 
     def _weighted_pick(self) -> MetaTile:
         """Select a random image according to its weight."""
-        #idx = random.choices(range(len(self._meta_tiles)), weights=self._weights, k=1)[0]
         weights = [tile.weight.value for tile in self._meta_tiles]
         mt = random.choices(self._meta_tiles, weights=weights, k=1)[0]
         return mt
