@@ -189,6 +189,24 @@ class EndlessScrollWidget(QWidget):
             self._tiles.append(tile)
             x += tile.width + self.GAP_PX
 
+    def _cull_and_fill(self):
+        # Cull tiles fully off-screen to the left
+        self._tiles = [t for t in self._tiles if t.right > 0]
+
+        # Fill the right side until we're past the visible area (+ buffer)
+        target_w = self._target_width()
+        buffer = self._target_height()
+        if self._tiles:
+            rightmost = max(t.right for t in self._tiles)
+        else:
+            rightmost = 0.0
+        while rightmost < target_w + buffer:
+            tile = self._spawn_tile(rightmost)
+            if tile is None:
+                break
+            self._tiles.append(tile)
+            rightmost += tile.width + self.GAP_PX
+
     # ------------------------------------------------------------------
     # Animation loop
     # ------------------------------------------------------------------
@@ -200,24 +218,7 @@ class EndlessScrollWidget(QWidget):
         for tile in self._tiles:
             tile.x -= self._speed
 
-        # 2. Cull tiles that are fully off-screen to the left
-        self._tiles = [t for t in self._tiles if t.right > 0]
-
-        # 3. Fill the right side until we're past the visible area (+ buffer)
-        target_w = self._target_width()
-        buffer = self._target_height()  # one screen-height of lookahead
-        if self._tiles:
-            rightmost = max(t.right for t in self._tiles)
-        else:
-            rightmost = 0.0
-
-        while rightmost < target_w + buffer:
-            tile = self._spawn_tile(rightmost)
-            if tile is None:
-                break
-            self._tiles.append(tile)
-            rightmost += tile.width + self.GAP_PX
-
+        self._cull_and_fill()
         self.update()  # trigger repaint
 
     # ------------------------------------------------------------------
@@ -232,12 +233,40 @@ class EndlessScrollWidget(QWidget):
             px = int(tile.x)
             painter.drawPixmap(px, 0, tile.pixmap)
 
+        self._cull_and_fill()
+        self.update()
         painter.end()
+
+    # ------------------------------------------------------------------
+    # Window / monitor setup
+    # ------------------------------------------------------------------
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Re-scale all tiles when the window is resized."""
+        super().resizeEvent(event)
+        target_h = self._target_height()
+        for tile in self._tiles:
+            original = self._resourceLoader.get_pixmap(tile.metaTile.image_filename)
+            if original and original.height() != target_h:
+                tile.pixmap = original.scaledToHeight(target_h, Qt.SmoothTransformation)
+
+        if not self._tiles:
+            self._seed_tiles()
+            self.update()
+            return
+
+        # Re-layout tiles sequentially to respect GAP_PX
+        self._tiles.sort(key=lambda t: t.x)
+        x = self._tiles[0].x  # preserve scroll position of leftmost tile
+        for tile in self._tiles:
+            tile.x = x
+            x += tile.width + self.GAP_PX
+
+        self._cull_and_fill()
 
     # ------------------------------------------------------------------
     # Close on any input (screensaver behaviour)
     # ------------------------------------------------------------------
-
     def keyPressEvent(self, event) -> None:  # noqa: N802
         self._shutdown()
 
