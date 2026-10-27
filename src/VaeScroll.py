@@ -266,11 +266,13 @@ class EndlessScrollWidget(QWidget):
 # ======================================================================
 
 def main() -> None:
+    default_speed = 0.5
+
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
                         help="Run in a window instead of fullscreen (for testing)")
-    parser.add_argument("--speed", type=float, default=1.5,
-                        help="Scroll speed in pixels per frame (default: 1.2)")
+    parser.add_argument("--speed", type=float, default=default_speed,
+                        help=f"Scroll speed in pixels per frame (default: {default_speed})")
     args = parser.parse_args()
 
     fullscreen = not args.window
