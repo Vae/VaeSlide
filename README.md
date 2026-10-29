@@ -4,7 +4,7 @@ Basically it's a scrolling screensaver implemented in Python using PySide6.
 
 ### Why?
 
-- Learning how to use AI in my personal projects and how it fits into IDE workflows
+- Learning how to use AI in my personal projects and how it fits into IDE workflows. Plus, I want to see what AI can do and how far I can push it
 - Experimenting with Python. I'm mostly a C++ developer, but I'm interested in expanding my skillset and Python is extremely popular
 - Creating a fun project I'll personally use
 - Publishing something someone might want to use
