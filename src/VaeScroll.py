@@ -28,6 +28,7 @@ from PIL import Image
 
 from src.ResourceLoader import ResourceLoader
 from src.Tile import Weight, MetaTile, Tile
+from src.TileImage import TileImage
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -109,7 +110,7 @@ class EndlessScrollWidget(QWidget):
                 with Image.open(png_path) as img:
                     width, height = img.size
 
-            metaTile = MetaTile(weight=weight, json_filename=json_path, image_filename=png_path, width=width, height=height)
+            metaTile = MetaTile(weight=weight, json_filename=json_path, image_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
         if not self._meta_tiles:
@@ -169,7 +170,7 @@ class EndlessScrollWidget(QWidget):
         pixmap = self._resourceLoader.get_pixmap(metaTile.image_filename)
         if pixmap:
             scaled = self._resize_pixmap(pixmap)
-            return Tile(pixmap=scaled, x=x, metaTile=metaTile)
+            return TileImage(pixmap=scaled, x=x, meta_tile=metaTile)
         return None
 
     def _seed_tiles(self) -> None:
@@ -227,8 +228,7 @@ class EndlessScrollWidget(QWidget):
         painter.fillRect(self.rect(), self._bg_color)
 
         for tile in self._tiles:
-            px = int(tile.x)
-            painter.drawPixmap(px, 0, tile.pixmap)
+            tile.draw(painter)
 
         self._cull_and_fill()
         self.update()
@@ -243,9 +243,10 @@ class EndlessScrollWidget(QWidget):
         super().resizeEvent(event)
         target_h = self._target_height()
         for tile in self._tiles:
-            original = self._resourceLoader.get_pixmap(tile.metaTile.image_filename)
+            original = self._resourceLoader.get_pixmap(tile.meta_tile.image_filename)
             if original and original.height() != target_h:
-                tile.pixmap = original.scaledToHeight(target_h, Qt.SmoothTransformation)
+                #tile.pixmap = original.scaledToHeight(target_h, Qt.SmoothTransformation)
+                tile.set_height(target_h)
 
         if not self._tiles:
             self._seed_tiles()

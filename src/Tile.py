@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import List
 
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QPainter
+
+from src.ResourceLoader import ResourceLoader
 
 
 @dataclass
@@ -17,21 +19,25 @@ class MetaTile:
     weight: Weight
     image_filename: str
     json_filename: str
+    resource_loader: ResourceLoader
+
 
 @dataclass
 class Tile:
     """A single image tile being scrolled across the screen."""
-    pixmap: QPixmap
     x: float  # left-edge position in pixels (can be fractional)
-    metaTile: MetaTile  # just in case
+    meta_tile: MetaTile  # just in case
 
-    #subimages that have actually spawned
-    #subimages: List[TileOverlay] = field(default_factory=list)
+    def draw(self, painter: QPainter):
+        pass
 
     @property
     def width(self) -> int:
-        return self.pixmap.width()
+        return 1000
 
     @property
     def right(self) -> float:
-        return self.x + self.width
+        return 1000
+
+    def set_height(self, target_h: int):
+        pass
