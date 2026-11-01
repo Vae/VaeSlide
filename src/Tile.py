@@ -14,30 +14,36 @@ class Weight:
 @dataclass
 class MetaTile:
     """A loaded image with its display weight."""
+    weight: Weight
+    type: str
+
     width: int
     height: int
-    weight: Weight
+
     image_filename: str
     json_filename: str
     resource_loader: ResourceLoader
 
 
-@dataclass
 class Tile:
     """A single image tile being scrolled across the screen."""
     x: float  # left-edge position in pixels (can be fractional)
     meta_tile: MetaTile  # just in case
 
+    def __init__(self, x: float, h: int, meta_tile: MetaTile):
+        self.x = x
+        self.meta_tile = meta_tile
+        self.set_height(h)
+
     def draw(self, painter: QPainter):
         pass
 
-    @property
-    def width(self) -> int:
-        return 1000
+    def get_width(self) -> int:
+        return int(self.meta_tile.width * self._height / self.meta_tile.height)
 
     @property
     def right(self) -> float:
-        return 1000
+        return self.x + self.get_width()
 
     def set_height(self, target_h: int):
-        pass
+        self._height = target_h

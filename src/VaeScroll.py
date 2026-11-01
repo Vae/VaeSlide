@@ -20,15 +20,19 @@ import argparse
 import logging
 from typing import List, Optional
 
+from moviepy import VideoFileClip
+
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtGui import QPixmap, QPainter, QColor, QSurfaceFormat
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QUrl
 
 from PIL import Image
 
 from src.ResourceLoader import ResourceLoader
 from src.Tile import Weight, MetaTile, Tile
 from src.TileImage import TileImage
+from src.TileVideo import TileVideo
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -60,7 +64,7 @@ class EndlessScrollWidget(QWidget):
 
         # Setup
         # self._assets = self._load_assets(["assets"])
-        self.load_assets("assets")
+        #self.load_assets("assets")
         self._configure_window()
         self._seed_tiles()
 
@@ -74,19 +78,46 @@ class EndlessScrollWidget(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAcceptDrops(True)
 
+        self._video_files = []
+
+    @staticmethod
+    def get_video_dim(file_path: str):
+        clip = VideoFileClip(file_path)
+
+        # Get dimensions using .size (returns tuple) or .w and .h
+        width, height = clip.size
+
+        return width, height
+
+    def load_videos(self, video_dir: str):
+        self._video_files = sorted(
+            f for f in os.listdir(video_dir)
+            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(".mov")
+        )
+
+        for video_file in self._video_files:
+            #full_path = os.path.join(video_dir, video_file)
+            full_path = video_dir + "/" + video_file
+            width, height = EndlessScrollWidget.get_video_dim(full_path)
+            metaTile = MetaTile(weight=Weight(50.0), type="video", json_filename="", image_filename=full_path, width=width,
+                                height=height, resource_loader=self._resourceLoader)
+            self._meta_tiles.append(metaTile)
+
+        logger.info(f"Loaded {len(self._video_files)} video files from {video_dir}")
+
+
     # ------------------------------------------------------------------
     # Image loading
     # ------------------------------------------------------------------
-    def load_assets(self, path: str) -> None:
+    def load_assets(self, assets_dir: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
-        assets_dir = path
         if not os.path.isdir(assets_dir):
             logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", assets_dir)
             return
 
         png_files = sorted(
             f for f in os.listdir(assets_dir)
-            if f.lower().endswith(".png")
+            if f.lower().endswith(".png") or f.lower().endswith(".jpg") or f.lower().endswith(".jpeg")
         )
 
         for png_name in png_files:
@@ -110,11 +141,13 @@ class EndlessScrollWidget(QWidget):
                 with Image.open(png_path) as img:
                     width, height = img.size
 
-            metaTile = MetaTile(weight=weight, json_filename=json_path, image_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
+            metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, image_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
         if not self._meta_tiles:
             logging.error("No valid assets loaded. A black screen will be displayed.")
+
+        random.shuffle(self._meta_tiles)
 
         logging.info(f"Loaded {len(self._meta_tiles)} assets from '{assets_dir}'.")
 
@@ -163,14 +196,19 @@ class EndlessScrollWidget(QWidget):
         """Select a random image according to its weight."""
         weights = [tile.weight.value for tile in self._meta_tiles]
         mt = random.choices(self._meta_tiles, weights=weights, k=1)[0]
+        mt.weight.value -= 1
         return mt
 
     def _spawn_tile(self, x: float) -> Optional[Tile]:
-        metaTile = self._weighted_pick()
-        pixmap = self._resourceLoader.get_pixmap(metaTile.image_filename)
-        if pixmap:
-            scaled = self._resize_pixmap(pixmap)
-            return TileImage(pixmap=scaled, x=x, meta_tile=metaTile)
+        meta_tile = self._weighted_pick()
+        if meta_tile.type == "image":
+            pixmap = self._resourceLoader.get_pixmap(meta_tile.image_filename)
+            if pixmap:
+                scaled = self._resize_pixmap(pixmap)
+                return TileImage(meta_tile=meta_tile, x=x, h=self.height(),  pixmap=scaled)
+        if meta_tile.type == "video":
+            tile = TileVideo(video_filename=meta_tile.image_filename, x=x, h=self.height(), meta_tile=meta_tile)
+            return tile
         return None
 
     def _seed_tiles(self) -> None:
@@ -185,7 +223,8 @@ class EndlessScrollWidget(QWidget):
             if tile is None:
                 break
             self._tiles.append(tile)
-            x += tile.width + self.GAP_PX
+            tile_width = tile.get_width()
+            x += tile_width + self.GAP_PX
 
     def _cull_and_fill(self):
         # Cull tiles fully off-screen to the left
@@ -203,7 +242,8 @@ class EndlessScrollWidget(QWidget):
             if tile is None:
                 break
             self._tiles.append(tile)
-            rightmost += tile.width + self.GAP_PX
+            tile_width = tile.get_width()
+            rightmost += tile_width + self.GAP_PX
 
     # ------------------------------------------------------------------
     # Animation loop
@@ -258,7 +298,8 @@ class EndlessScrollWidget(QWidget):
         x = self._tiles[0].x  # preserve scroll position of leftmost tile
         for tile in self._tiles:
             tile.x = x
-            x += tile.width + self.GAP_PX
+            x += tile.get_width() + self.GAP_PX
+            tile.set_height(target_h)
 
         self._cull_and_fill()
 
@@ -293,7 +334,7 @@ class EndlessScrollWidget(QWidget):
 # ======================================================================
 
 def main() -> None:
-    default_speed = 0.5
+    default_speed = 10.0
 
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
@@ -315,7 +356,9 @@ def main() -> None:
     app.setQuitOnLastWindowClosed(True)
 
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
-    widget.load_assets("secret_assets")
+    #widget.load_assets("secret_assets")
+    widget.load_assets("C:/Users/vae/Desktop/pix/copy/slideshow")
+    widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
     widget.show()
 
     print("Screensaver running; click / press any key to exit.")
