@@ -23,49 +23,57 @@ from typing import List, Optional
 from moviepy import VideoFileClip
 
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtGui import QPixmap, QPainter, QColor, QSurfaceFormat
-from PySide6.QtCore import QTimer, Qt, QUrl
+from PySide6.QtGui import QPainter, QColor, QSurfaceFormat
+from PySide6.QtCore import QTimer, Qt
 
 from PIL import Image
 
 from src.ResourceLoader import ResourceLoader
-from src.Tile import Weight, MetaTile, Tile
-from src.TileImage import TileImage
-from src.TileVideo import TileVideo
+from src.Tile import Weight, MetaTile
+from src.ScrollLayer import ScrollLayer, LayerConfig
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
 
 class EndlessScrollWidget(QWidget):
     """
     The main screensaver widget.
 
-    Maintains a list of image tiles that scroll from right to left.
-    Tiles that exit the left edge are recycled; new tiles are spawned
-    on the right edge to keep the screen full — creating an endless scroll.
+    Draws several horizontally scrolling layers at different speeds to
+    create a parallax effect. Each layer has its own tiles and overlaps
+    the previous layer by a percentage of the screen height.
     """
 
     GAP_PX = -1  # gap between tiles (0 = seamless)
 
-    def __init__(self, fullscreen: bool, speed: float):
+    # Back to front. overlap = fraction of screen height covered by the previous layer.
+    DEFAULT_LAYERS = [
+        LayerConfig(speed_factor=0.25, overlap=0.0),
+        LayerConfig(speed_factor=0.6,  overlap=0.20),
+        LayerConfig(speed_factor=1.0,  overlap=0.30),
+    ]
+
+    def __init__(self, fullscreen: bool, speed: float, layers: Optional[List[LayerConfig]] = None):
         super().__init__()
 
         self._fullscreen = fullscreen
         self._speed = speed
-        self._tiles: List[Tile] = []
         self._resourceLoader = ResourceLoader()
+        self._video_files = []
 
-        #two containers, same content. Combine?
+        # Master list; each layer receives its own copy in build_layers()
         self._meta_tiles: List[MetaTile] = []
+
+        self._layers: List[ScrollLayer] = [
+            ScrollLayer(cfg, self._resourceLoader, self.GAP_PX)
+            for cfg in (layers or self.DEFAULT_LAYERS)
+        ]
 
         # Background colour visible in gaps (if any)
         self._bg_color = QColor("#0a0a0a")
 
-        # Setup
-        # self._assets = self._load_assets(["assets"])
-        #self.load_assets("assets")
         self._configure_window()
-        self._seed_tiles()
 
         # Animation timer (~60 fps)
         self._timer = QTimer(self)
@@ -77,6 +85,7 @@ class EndlessScrollWidget(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAcceptDrops(True)
 
+# ... existing code ...
         self._video_files = []
 
     @staticmethod
@@ -168,94 +177,67 @@ class EndlessScrollWidget(QWidget):
             self.resize(1280, 720)
 
     # ------------------------------------------------------------------
-    # Tile management
+    # Layer management
     # ------------------------------------------------------------------
-    def _target_height(self) -> int:
-        """Height that images should be scaled to (the visible screen height)."""
-        h = self.height()
-        if h > 0:
-            return h
-        # Widget may not have a size yet (before show)
-        return QApplication.primaryScreen().virtualGeometry().height()
+    def build_layers(self) -> None:
+        """Give every layer its own tiles. Call after loading assets/videos."""
+        for layer in self._layers:
+            layer.set_meta_tiles(self._meta_tiles)
+        self._layout_layers()
 
-    def _target_width(self) -> int:
-        w = self.width()
-        if w > 0:
-            return w
-        return QApplication.primaryScreen().virtualGeometry().width()
-
-    def _resize_pixmap(self, pixmap: QPixmap) -> QPixmap:
-        """Scale pixmap to target height, preserving aspect ratio."""
-        target_h = self._target_height()
-        if pixmap.height() == target_h:
-            return pixmap
-        return pixmap.scaledToHeight(target_h, Qt.SmoothTransformation)
-
-    def _weighted_pick(self) -> MetaTile:
-        """Select a random image according to its weight."""
-        weights = [tile.weight.value for tile in self._meta_tiles]
-        mt = random.choices(self._meta_tiles, weights=weights, k=1)[0]
-        mt.weight.value -= 1
-        return mt
-
-    def _spawn_tile(self, x: float) -> Optional[Tile]:
-        meta_tile = self._weighted_pick()
-        if meta_tile.type == "image":
-            pixmap = self._resourceLoader.get_pixmap(meta_tile.image_filename)
-            if pixmap:
-                scaled = self._resize_pixmap(pixmap)
-                return TileImage(meta_tile=meta_tile, x=x, h=self.height(),  pixmap=scaled)
-        if meta_tile.type == "video":
-            tile = TileVideo(video_filename=meta_tile.image_filename, x=x, h=self.height(), meta_tile=meta_tile)
-            return tile
-        return None
-
-    def _seed_tiles(self) -> None:
-        """Pre-populate tiles so the screen is full on first paint."""
-        if not self._meta_tiles:
+    def _layout_layers(self) -> None:
+        """
+        Stack the layers vertically so that layer i overlaps layer i-1 by
+        overlap_i * screen height, and the whole stack exactly fills the screen.
+        """
+        screen_w = self.width()
+        screen_h = self.height()
+        if screen_w <= 0 or screen_h <= 0 or not self._layers:
             return
 
-        target_w = self._target_width()
-        x = 0.0
-        while x < target_w + self._target_height():  # buffer beyond edge
-            tile = self._spawn_tile(x)
-            if tile is None:
-                break
-            self._tiles.append(tile)
-            tile_width = tile.get_width()
-            x += tile_width + self.GAP_PX
+        count = len(self._layers)
+        total_overlap = sum(l.config.overlap for l in self._layers[1:])
+        band_h = max(1, int(screen_h * (1.0 + total_overlap) / count))
 
-    def _cull_and_fill(self):
-        # Cull tiles fully off-screen to the left
-        self._tiles = [t for t in self._tiles if t.right > 0]
+        y = 0.0
+        for i, layer in enumerate(self._layers):
+            if i > 0:
+                y += band_h - layer.config.overlap * screen_h
+            layer.set_geometry(int(y), screen_w, band_h)
 
-        # Fill the right side until we're past the visible area (+ buffer)
-        target_w = self._target_width()
-        buffer = self._target_height()
-        if self._tiles:
-            rightmost = max(t.right for t in self._tiles)
-        else:
-            rightmost = 0.0
-        while rightmost < target_w + buffer:
-            tile = self._spawn_tile(rightmost)
-            if tile is None:
-                break
-            self._tiles.append(tile)
-            tile_width = tile.get_width()
-            rightmost += tile_width + self.GAP_PX
+        # ------------------------------------------------------------------
+        # Animation loop
+        # ------------------------------------------------------------------
+        def _tick(self) -> None:
+            for layer in self._layers:
+                layer.tick(self._speed)
+            self.update()  # trigger repaint
+
+        # ------------------------------------------------------------------
+        # Painting
+        # ------------------------------------------------------------------
+        def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.fillRect(self.rect(), self._bg_color)
+
+            # Back to front
+            for layer in self._layers:
+                layer.draw(painter)
+
+            painter.end()
+
+        def resizeEvent(self, event) -> None:  # noqa: N802
+            """Re-scale and re-flow every layer when the window is resized."""
+            super().resizeEvent(event)
+            self._layout_layers()
 
     # ------------------------------------------------------------------
     # Animation loop
     # ------------------------------------------------------------------
     def _tick(self) -> None:
-        #if not self._meta_tiles:
-        #    return
-
-        # 1. Shift every tile left
-        for tile in self._tiles:
-            tile.x -= self._speed
-
-        self._cull_and_fill()
+        for layer in self._layers:
+            layer.tick(self._speed)
         self.update()  # trigger repaint
 
     # ------------------------------------------------------------------
@@ -266,42 +248,20 @@ class EndlessScrollWidget(QWidget):
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         painter.fillRect(self.rect(), self._bg_color)
 
-        for tile in self._tiles:
-            tile.draw(painter)
+        # Back to front
+        for layer in self._layers:
+            layer.draw(painter)
 
-        self._cull_and_fill()
-        self.update()
         painter.end()
 
     # ------------------------------------------------------------------
-    # Window / monitor setup
+    # Layer management
     # ------------------------------------------------------------------
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        """Re-scale all tiles when the window is resized."""
+        """Re-scale and re-flow every layer when the window is resized."""
         super().resizeEvent(event)
-        target_h = self._target_height()
-        for tile in self._tiles:
-            original = self._resourceLoader.get_pixmap(tile.meta_tile.image_filename)
-            if original and original.height() != target_h:
-                #tile.pixmap = original.scaledToHeight(target_h, Qt.SmoothTransformation)
-                tile.set_height(target_h)
-
-        if not self._tiles:
-            self._seed_tiles()
-            self.update()
-            return
-
-        # Re-layout tiles sequentially to respect GAP_PX
-        self._tiles.sort(key=lambda t: t.x)
-        x = self._tiles[0].x  # preserve scroll position of leftmost tile
-        for tile in self._tiles:
-            tile.x = x
-            x += tile.get_width() + self.GAP_PX
-            tile.set_height(target_h)
-
-        self._cull_and_fill()
-
+        self._layout_layers()
     # ------------------------------------------------------------------
     # Close on any input (screensaver behaviour)
     # ------------------------------------------------------------------
@@ -333,7 +293,7 @@ class EndlessScrollWidget(QWidget):
 # ======================================================================
 
 def main() -> None:
-    default_speed = 10.0
+    default_speed = 1.0
 
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
@@ -358,6 +318,7 @@ def main() -> None:
     #widget.load_assets("secret_assets")
     widget.load_assets("C:/Users/vae/Desktop/pix/copy/slideshow")
     widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
+    widget.build_layers()
     widget.show()
 
     print("Screensaver running; click / press any key to exit.")
