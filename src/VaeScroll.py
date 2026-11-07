@@ -22,7 +22,6 @@ from typing import List, Optional
 
 from moviepy import VideoFileClip
 
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtGui import QPixmap, QPainter, QColor, QSurfaceFormat
 from PySide6.QtCore import QTimer, Qt, QUrl
@@ -249,8 +248,8 @@ class EndlessScrollWidget(QWidget):
     # Animation loop
     # ------------------------------------------------------------------
     def _tick(self) -> None:
-        if not self._meta_tiles:
-            return
+        #if not self._meta_tiles:
+        #    return
 
         # 1. Shift every tile left
         for tile in self._tiles:
