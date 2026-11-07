@@ -5,7 +5,7 @@ from PySide6.QtGui import QPainter
 
 from src.ResourceLoader import ResourceLoader
 from src.Tile import MetaTile
-from src.TileLayout import TileLayout
+from src.HorizontalStrip import TileLayout
 
 
 @dataclass(frozen=True)

@@ -70,7 +70,7 @@ class EndlessScrollWidget(QWidget):
             for cfg in (layers or self.DEFAULT_LAYERS)
         ]
 
-        # Background colour visible in gaps (if any)
+        # Background color visible in gaps (if any)
         self._bg_color = QColor("#0a0a0a")
 
         self._configure_window()
@@ -85,8 +85,8 @@ class EndlessScrollWidget(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAcceptDrops(True)
 
-# ... existing code ...
         self._video_files = []
+
 
     @staticmethod
     def get_video_dim(file_path: str):
@@ -94,7 +94,6 @@ class EndlessScrollWidget(QWidget):
 
         # Get dimensions using .size (returns tuple) or .w and .h
         width, height = clip.size
-
         return width, height
 
     def load_videos(self, video_dir: str):
@@ -113,10 +112,6 @@ class EndlessScrollWidget(QWidget):
 
         logger.info(f"Loaded {len(self._video_files)} video files from {video_dir}")
 
-
-    # ------------------------------------------------------------------
-    # Image loading
-    # ------------------------------------------------------------------
     def load_assets(self, assets_dir: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
         if not os.path.isdir(assets_dir):
@@ -205,33 +200,6 @@ class EndlessScrollWidget(QWidget):
                 y += band_h - layer.config.overlap * screen_h
             layer.set_geometry(int(y), screen_w, band_h)
 
-        # ------------------------------------------------------------------
-        # Animation loop
-        # ------------------------------------------------------------------
-        def _tick(self) -> None:
-            for layer in self._layers:
-                layer.tick(self._speed)
-            self.update()  # trigger repaint
-
-        # ------------------------------------------------------------------
-        # Painting
-        # ------------------------------------------------------------------
-        def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            painter.fillRect(self.rect(), self._bg_color)
-
-            # Back to front
-            for layer in self._layers:
-                layer.draw(painter)
-
-            painter.end()
-
-        def resizeEvent(self, event) -> None:  # noqa: N802
-            """Re-scale and re-flow every layer when the window is resized."""
-            super().resizeEvent(event)
-            self._layout_layers()
-
     # ------------------------------------------------------------------
     # Animation loop
     # ------------------------------------------------------------------
@@ -254,14 +222,11 @@ class EndlessScrollWidget(QWidget):
 
         painter.end()
 
-    # ------------------------------------------------------------------
-    # Layer management
-    # ------------------------------------------------------------------
-
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Re-scale and re-flow every layer when the window is resized."""
         super().resizeEvent(event)
         self._layout_layers()
+
     # ------------------------------------------------------------------
     # Close on any input (screensaver behaviour)
     # ------------------------------------------------------------------
@@ -291,7 +256,6 @@ class EndlessScrollWidget(QWidget):
 # ======================================================================
 # Entry point
 # ======================================================================
-
 def main() -> None:
     default_speed = 1.0
 
