@@ -42,9 +42,12 @@ class TileImage(Tile):
     """Holds the pixmap for a tile and provides a generic draw method."""
 
     def __init__(self, meta_tile: MetaTile, x: float, h: int, pixmap: QPixmap):
-        #super().__init__(*args, **kwargs)
+        self._masking_enabled = False
         super().__init__(meta_tile=meta_tile, x=x, h=h)
-        self._pixmap = _make_white_transparent(pixmap)
+        if self._masking_enabled:
+            self._pixmap = _make_white_transparent(pixmap)
+        else:
+            self._pixmap = pixmap
 
     def pixmap(self) -> QPixmap:
         return self._pixmap
@@ -57,9 +60,12 @@ class TileImage(Tile):
         return self.x + self.get_width()
 
     def set_height(self, target_h: int):
-        self._pixmap = _make_white_transparent(
+        if self._masking_enabled:
+            self._pixmap = _make_white_transparent(
+                self.meta_tile.resource_loader.get_pixmap(self.meta_tile.image_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
+            )
+        else:
             self.meta_tile.resource_loader.get_pixmap(self.meta_tile.image_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
-        )
 
     def draw(self, painter: QPainter) -> None:
         """Draw this tile image at position (x, y) on the given painter."""

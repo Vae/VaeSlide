@@ -4,7 +4,7 @@ from PySide6.QtGui import QPixmap
 
 logger = logging.getLogger(__name__)
 
-PURGE_TIMEOUT = 15 * 60  # 15 minutes in seconds
+PURGE_TIMEOUT = 15 * 60  # 15 minutes
 
 class ResourceLoader:
     """Loads and maintains resources from the disk."""

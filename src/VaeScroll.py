@@ -53,6 +53,11 @@ class EndlessScrollWidget(QWidget):
         LayerConfig(speed_factor=0.6,  overlap=0.20),
         LayerConfig(speed_factor=1.0,  overlap=0.30),
     ]
+    DEFAULT_LAYERS = [
+        LayerConfig(speed_factor=0.25, overlap=0.0),
+        LayerConfig(speed_factor=0.6,  overlap=0.0),
+        LayerConfig(speed_factor=1.0,  overlap=0.0),
+    ]
 
     def __init__(self, fullscreen: bool, speed: float, layers: Optional[List[LayerConfig]] = None):
         super().__init__()
@@ -281,7 +286,7 @@ def main() -> None:
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
     #widget.load_assets("secret_assets")
     widget.load_assets("C:/Users/vae/Desktop/pix/copy/slideshow")
-    widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
+    #widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
     widget.build_layers()
     widget.show()
 
