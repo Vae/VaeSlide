@@ -17,7 +17,6 @@ class TileVideo(Tile):
 
         self._videoFilePath = video_filename
 
-        self.current_image = QImage()
         self.scaled_img = QImage()
         self.player = QMediaPlayer()
 
@@ -36,12 +35,23 @@ class TileVideo(Tile):
     def process_frame(self, frame):
         """Converts incoming QVideoFrame into a paintable QImage."""
         if frame.isValid():
-            # Convert the frame directly to a QImage
-            self.current_image = frame.toImage()
-            self.scaled_img = self.current_image.scaled(QtCore.QSize(self.width, self._height),
-                                                        QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+            img = frame.toImage()
+            if img.isNull():
+                return
+
+            target_size = QtCore.QSize(self.width, self._height)
+            if img.size() == target_size:
+                # If the dimensions match, avoid the expensive scaling operation
+                self.scaled_img = img
+            else:
+                # Use FastTransformation to reduce CPU load during scaling
+                self.scaled_img = img.scaled(
+                    target_size,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    QtCore.Qt.TransformationMode.FastTransformation
+                )
 
     def draw(self, painter: QPainter) -> None:
-        if self.current_image.isNull():
+        if self.scaled_img.isNull():
             return
         painter.drawImage(int(self.x), 0, self.scaled_img)
