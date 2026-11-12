@@ -30,6 +30,7 @@ from PIL import Image
 
 from src.ResourceLoader import ResourceLoader
 from src.Tile import Weight, MetaTile
+from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class EndlessScrollWidget(QWidget):
         self._fullscreen = fullscreen
         self._speed = speed
         self._resourceLoader = ResourceLoader()
+        self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
 
         # Master list; each layer receives its own copy in build_layers()
         self._meta_tiles: List[MetaTile] = []
@@ -108,11 +110,18 @@ class EndlessScrollWidget(QWidget):
         self._video_files = []
 
     @staticmethod
-    def get_video_dim(file_path: str):
+    def get_video_dim(file_path: str, media_cache: Optional['MediaCache'] = None):
+        if media_cache:
+            cached = media_cache.get_dimensions(file_path)
+            if cached:
+                return cached
+
         clip = VideoFileClip(file_path)
 
         # Get dimensions using .size (returns tuple) or .w and .h
         width, height = clip.size
+        if media_cache:
+            media_cache.add_dimensions(file_path, width, height)
         return width, height
 
     def load_videos(self, path_to_videos: str):
@@ -123,13 +132,14 @@ class EndlessScrollWidget(QWidget):
 
         for video_file in video_files:
             #full_path = os.path.join(video_dir, video_file)
-            full_path = path_to_videos + "/" + video_file
-            width, height = EndlessScrollWidget.get_video_dim(full_path)
+            full_path = os.path.join(path_to_videos, video_file)
+            width, height = EndlessScrollWidget.get_video_dim(full_path, self._mediaCache)
             metaTile = MetaTile(weight=Weight(1.0), type="video", json_filename="", resource_filename=full_path, width=width,
                                 height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
         logger.info(f"Loaded {len(video_files)} video files from {path_to_videos}")
+        self._mediaCache.save_cache()
 
     def load_images(self, path_to_images: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
@@ -160,8 +170,13 @@ class EndlessScrollWidget(QWidget):
                 except (json.JSONDecodeError, ValueError, OSError) as exc:
                     logging.warning(f"Bad JSON for {base}.json: {exc} — defaulting weight to 1")
             else: # fallback requires opening the image and getting the dimensions
-                with Image.open(png_path) as img:
-                    width, height = img.size
+                cached = self._mediaCache.get_dimensions(png_path)
+                if cached:
+                    width, height = cached
+                else:
+                    with Image.open(png_path) as img:
+                        width, height = img.size
+                    self._mediaCache.add_dimensions(png_path, width, height)
 
             metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, resource_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
@@ -172,6 +187,7 @@ class EndlessScrollWidget(QWidget):
         random.shuffle(self._meta_tiles)
 
         logging.info(f"Loaded {len(self._meta_tiles)} assets from '{path_to_images}'.")
+        self._mediaCache.save_cache()
 
     # ------------------------------------------------------------------
     # Window / monitor setup
@@ -314,7 +330,6 @@ def main() -> None:
     widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
     widget.load_videos("C:/Users/vae/AI Output/video")
     widget.load_videos("V:/tmp/syncs/furpic/vid")
-
 
     widget.build_layers()
     widget.show()

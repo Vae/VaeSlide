@@ -3,3 +3,4 @@ dist
 .venv
 .idea
 .git
+.media_cache.json
