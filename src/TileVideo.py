@@ -12,7 +12,7 @@ from PySide6.QtGui import QPainter, QImage
 class TileVideo(Tile):
     """Holds the pixmap for a tile and provides a generic draw method."""
 
-    def __init__(self, meta_tile: MetaTile, x: float, h: int,video_filename: str, ):
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, video_filename: str, ):
         super().__init__(meta_tile=meta_tile, x=x, h=h)
 
         self._videoFilePath = video_filename
@@ -38,7 +38,7 @@ class TileVideo(Tile):
         if frame.isValid():
             # Convert the frame directly to a QImage
             self.current_image = frame.toImage()
-            self.scaled_img = self.current_image.scaled(QtCore.QSize(self.get_width(), self._height),
+            self.scaled_img = self.current_image.scaled(QtCore.QSize(self.width, self._height),
                                                         QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding)
 
     def draw(self, painter: QPainter) -> None:

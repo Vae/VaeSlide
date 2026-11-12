@@ -85,7 +85,7 @@ class TileLayout:
             if tile is None:
                 break
             self._tiles.append(tile)
-            rightmost += max(1, tile.get_width() + self._gap_px)
+            rightmost += max(1, tile.width + self._gap_px)
 
     def resize(self, width: int, height: int) -> None:
         """Re-scale and re-flow all tiles for a new viewport size."""
@@ -102,7 +102,7 @@ class TileLayout:
         for tile in self._tiles:
             tile.set_height(height)
             tile.x = x
-            x += tile.get_width() + self._gap_px
+            x += tile.width + self._gap_px
 
         self.cull_and_fill()
 

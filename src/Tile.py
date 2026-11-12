@@ -42,12 +42,13 @@ class Tile:
         """Check if the given (x, y) coordinates are within the tile."""
         return self.x <= x <= self.right and 0 <= y <= self.height
 
-    def get_width(self) -> int:
+    @property
+    def width(self) -> int:
         return int(self.meta_tile.width * self._height / self.meta_tile.height)
 
     @property
     def right(self) -> float:
-        return self.x + self.get_width()
+        return self.x + self.width
     @property
     def height(self) -> int:
         return self._height
