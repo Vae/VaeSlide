@@ -59,12 +59,12 @@ class TileLayout:
             return None
         meta_tile = self._weighted_pick()
         if meta_tile.type == "image":
-            pixmap = self._resource_loader.get_pixmap(meta_tile.image_filename)
+            pixmap = self._resource_loader.get_pixmap(meta_tile.resource_filename)
             if pixmap:
                 scaled = pixmap.scaledToHeight(self._height, Qt.SmoothTransformation)
                 return TileImage(meta_tile=meta_tile, x=x, h=self._height, pixmap=scaled)
         if meta_tile.type == "video":
-            return TileVideo(video_filename=meta_tile.image_filename, x=x,
+            return TileVideo(video_filename=meta_tile.resource_filename, x=x,
                              h=self._height, meta_tile=meta_tile)
         return None
 
@@ -113,6 +113,13 @@ class TileLayout:
         for tile in self._tiles:
             tile.x -= dx
         self.cull_and_fill()
+
+    def hit_test(self, x: float, y: float) -> Optional[Tile]:
+        """Check if the given (x, y) coordinates are within any tile in this layout."""
+        for tile in self._tiles:
+            if tile.hit_test(x, y):
+                return tile
+        return None
 
     def draw(self, painter: QPainter) -> None:
         for tile in self._tiles:

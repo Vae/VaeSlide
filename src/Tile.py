@@ -20,7 +20,7 @@ class MetaTile:
     width: int
     height: int
 
-    image_filename: str
+    resource_filename: str
     json_filename: str
     resource_loader: ResourceLoader
 
@@ -33,10 +33,14 @@ class Tile:
     def __init__(self, x: float, h: int, meta_tile: MetaTile):
         self.x = x
         self.meta_tile = meta_tile
-        self.set_height(h)
+        self._height = h
 
     def draw(self, painter: QPainter):
         pass
+
+    def hit_test(self, x: float, y: float) -> bool:
+        """Check if the given (x, y) coordinates are within the tile."""
+        return self.x <= x <= self.right and 0 <= y <= self.height
 
     def get_width(self) -> int:
         return int(self.meta_tile.width * self._height / self.meta_tile.height)
@@ -44,6 +48,9 @@ class Tile:
     @property
     def right(self) -> float:
         return self.x + self.get_width()
+    @property
+    def height(self) -> int:
+        return self._height
 
     def set_height(self, target_h: int):
         self._height = target_h

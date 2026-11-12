@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from PySide6.QtGui import QPainter
 
 from src.ResourceLoader import ResourceLoader
-from src.Tile import MetaTile
+from src.Tile import MetaTile, Tile
 from src.HorizontalStrip import TileLayout
 
 
@@ -36,6 +36,11 @@ class ScrollLayer:
 
     def tick(self, base_speed: float) -> None:
         self.layout.scroll(base_speed * self.config.speed_factor)
+
+    def hit_test(self, x: float, y: float) -> Optional[Tile]:
+        """Check if the given (x, y) coordinates are within any tile in this layer."""
+        tile = self.layout.hit_test(x, y - self.y)
+        return tile
 
     def draw(self, painter: QPainter) -> None:
         painter.save()

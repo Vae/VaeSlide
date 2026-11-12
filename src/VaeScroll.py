@@ -65,7 +65,6 @@ class EndlessScrollWidget(QWidget):
         self._fullscreen = fullscreen
         self._speed = speed
         self._resourceLoader = ResourceLoader()
-        self._video_files = []
 
         # Master list; each layer receives its own copy in build_layers()
         self._meta_tiles: List[MetaTile] = []
@@ -102,20 +101,20 @@ class EndlessScrollWidget(QWidget):
         return width, height
 
     def load_videos(self, video_dir: str):
-        self._video_files = sorted(
+        video_files = sorted(
             f for f in os.listdir(video_dir)
             if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(".mov")
         )
 
-        for video_file in self._video_files:
+        for video_file in video_files:
             #full_path = os.path.join(video_dir, video_file)
             full_path = video_dir + "/" + video_file
             width, height = EndlessScrollWidget.get_video_dim(full_path)
-            metaTile = MetaTile(weight=Weight(50.0), type="video", json_filename="", image_filename=full_path, width=width,
+            metaTile = MetaTile(weight=Weight(1.0), type="video", json_filename="", resource_filename=full_path, width=width,
                                 height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
-        logger.info(f"Loaded {len(self._video_files)} video files from {video_dir}")
+        logger.info(f"Loaded {len(video_files)} video files from {video_dir}")
 
     def load_assets(self, assets_dir: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
@@ -149,7 +148,7 @@ class EndlessScrollWidget(QWidget):
                 with Image.open(png_path) as img:
                     width, height = img.size
 
-            metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, image_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
+            metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, resource_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
         if not self._meta_tiles:
@@ -239,6 +238,13 @@ class EndlessScrollWidget(QWidget):
         self._shutdown()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
+        # Hit test all layers from front to back
+        for layer in reversed(self._layers):
+            tile = layer.hit_test(event.position().x(), event.position().y())
+            if tile:
+                print(f"Clicked tile: {tile.meta_tile.resource_filename}")
+                return
+
         self._shutdown()
 
     #def mouseMoveEvent(self, event) -> None:  # noqa: N802
@@ -272,7 +278,8 @@ def main() -> None:
     args = parser.parse_args()
 
     fullscreen = not args.window
-    #testing:
+
+    # Temp for testing: force non-fullscreen
     fullscreen = False
 
     surface_format = QSurfaceFormat()
@@ -285,8 +292,17 @@ def main() -> None:
 
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
     #widget.load_assets("secret_assets")
+
+    # Temp assets for testing images:
     widget.load_assets("C:/Users/vae/Desktop/pix/copy/slideshow")
-    #widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
+    widget.load_assets("C:/Users/vae/Vae Sync/Media/AI/Vae/Outputs")
+    widget.load_assets("C:/Users/vae/AI Output")
+
+    # Temp assets for testing videos:
+    widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
+    widget.load_videos("C:/Users/vae/AI Output/video")
+
+
     widget.build_layers()
     widget.show()
 

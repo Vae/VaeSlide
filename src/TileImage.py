@@ -62,10 +62,10 @@ class TileImage(Tile):
     def set_height(self, target_h: int):
         if self._masking_enabled:
             self._pixmap = _make_white_transparent(
-                self.meta_tile.resource_loader.get_pixmap(self.meta_tile.image_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
+                self.meta_tile.resource_loader.get_pixmap(self.meta_tile.resource_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
             )
         else:
-            self.meta_tile.resource_loader.get_pixmap(self.meta_tile.image_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
+            self.meta_tile.resource_loader.get_pixmap(self.meta_tile.resource_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
 
     def draw(self, painter: QPainter) -> None:
         """Draw this tile image at position (x, y) on the given painter."""
