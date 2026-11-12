@@ -49,6 +49,7 @@ class Tile:
     @property
     def right(self) -> float:
         return self.x + self.width
+
     @property
     def height(self) -> int:
         return self._height

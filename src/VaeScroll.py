@@ -262,9 +262,6 @@ class EndlessScrollWidget(QWidget):
 
         self._shutdown()
 
-    #def mouseMoveEvent(self, event) -> None:  # noqa: N802
-    #    self._shutdown()
-
     def wheelEvent(self, event) -> None:  # noqa: N802
         self._shutdown()
 
@@ -322,7 +319,7 @@ def main() -> None:
     widget.build_layers()
     widget.show()
 
-    print("Screensaver running; click / press any key to exit.")
+    print("Slideshow running; press any key to exit.")
     sys.exit(app.exec())
 
 
