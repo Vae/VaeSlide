@@ -49,17 +49,6 @@ class TileImage(Tile):
         else:
             self._pixmap = pixmap
 
-    def pixmap(self) -> QPixmap:
-        return self._pixmap
-
-    # @property
-    # def width(self) -> int:
-    #     return self._pixmap.width()
-    #
-    # @property
-    # def right(self) -> float:
-    #     return self.x + self.width
-
     def set_height(self, target_h: int):
         self._height = target_h
         if self._masking_enabled:
