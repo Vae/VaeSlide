@@ -36,6 +36,27 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 
+def generate_layer_configs(layer_count: int, overlap_multiplier: float) -> List[LayerConfig]:
+    """
+    Generates a list of LayerConfig objects.
+
+    The speed_factor is linearly interpolated from 0.25 to 1.0.
+    The overlap is linearly interpolated from 0.0 to overlap_multiplier.
+    """
+    if layer_count <= 0:
+        return []
+    if layer_count == 1:
+        return [LayerConfig(speed_factor=1.0, overlap=0.0)]
+
+    return [
+        LayerConfig(
+            speed_factor=0.25 + (1.0 - 0.25) * (i / (layer_count - 1)),
+            overlap=overlap_multiplier * (i / (layer_count - 1))
+        )
+        for i in range(layer_count)
+    ]
+
+
 class EndlessScrollWidget(QWidget):
     """
     The main screensaver widget.
@@ -53,11 +74,6 @@ class EndlessScrollWidget(QWidget):
         LayerConfig(speed_factor=0.6,  overlap=0.20),
         LayerConfig(speed_factor=1.0,  overlap=0.30),
     ]
-    DEFAULT_LAYERS = [
-        LayerConfig(speed_factor=0.25, overlap=0.0),
-        LayerConfig(speed_factor=0.6,  overlap=0.0),
-        LayerConfig(speed_factor=1.0,  overlap=0.0),
-    ]
 
     def __init__(self, fullscreen: bool, speed: float, layers: Optional[List[LayerConfig]] = None):
         super().__init__()
@@ -71,7 +87,7 @@ class EndlessScrollWidget(QWidget):
 
         self._layers: List[ScrollLayer] = [
             ScrollLayer(cfg, self._resourceLoader, self.GAP_PX)
-            for cfg in (layers or self.DEFAULT_LAYERS)
+            for cfg in (layers or generate_layer_configs(6, 0.0))
         ]
 
         # Background color visible in gaps (if any)
@@ -91,7 +107,6 @@ class EndlessScrollWidget(QWidget):
 
         self._video_files = []
 
-
     @staticmethod
     def get_video_dim(file_path: str):
         clip = VideoFileClip(file_path)
@@ -100,37 +115,37 @@ class EndlessScrollWidget(QWidget):
         width, height = clip.size
         return width, height
 
-    def load_videos(self, video_dir: str):
+    def load_videos(self, path_to_videos: str):
         video_files = sorted(
-            f for f in os.listdir(video_dir)
-            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(".mov")
+            f for f in os.listdir(path_to_videos)
+            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(".mov") or f.lower().endswith(".gif")
         )
 
         for video_file in video_files:
             #full_path = os.path.join(video_dir, video_file)
-            full_path = video_dir + "/" + video_file
+            full_path = path_to_videos + "/" + video_file
             width, height = EndlessScrollWidget.get_video_dim(full_path)
             metaTile = MetaTile(weight=Weight(1.0), type="video", json_filename="", resource_filename=full_path, width=width,
                                 height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 
-        logger.info(f"Loaded {len(video_files)} video files from {video_dir}")
+        logger.info(f"Loaded {len(video_files)} video files from {path_to_videos}")
 
-    def load_assets(self, assets_dir: str) -> None:
+    def load_images(self, path_to_images: str) -> None:
         """Scan ./assets for .png files, read paired .json for weight."""
-        if not os.path.isdir(assets_dir):
-            logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", assets_dir)
+        if not os.path.isdir(path_to_images):
+            logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", path_to_images)
             return
 
         png_files = sorted(
-            f for f in os.listdir(assets_dir)
+            f for f in os.listdir(path_to_images)
             if f.lower().endswith(".png") or f.lower().endswith(".jpg") or f.lower().endswith(".jpeg")
         )
 
         for png_name in png_files:
             base, _ = os.path.splitext(png_name)
-            png_path = os.path.join(assets_dir, png_name)
-            json_path = os.path.join(assets_dir, base + ".json")
+            png_path = os.path.join(path_to_images, png_name)
+            json_path = os.path.join(path_to_images, base + ".json")
 
             weight = Weight(1.0)
             width = 0
@@ -156,7 +171,7 @@ class EndlessScrollWidget(QWidget):
 
         random.shuffle(self._meta_tiles)
 
-        logging.info(f"Loaded {len(self._meta_tiles)} assets from '{assets_dir}'.")
+        logging.info(f"Loaded {len(self._meta_tiles)} assets from '{path_to_images}'.")
 
     # ------------------------------------------------------------------
     # Window / monitor setup
@@ -294,13 +309,14 @@ def main() -> None:
     #widget.load_assets("secret_assets")
 
     # Temp assets for testing images:
-    widget.load_assets("C:/Users/vae/Desktop/pix/copy/slideshow")
-    widget.load_assets("C:/Users/vae/Vae Sync/Media/AI/Vae/Outputs")
-    widget.load_assets("C:/Users/vae/AI Output")
+    widget.load_images("C:/Users/vae/Desktop/pix/copy/slideshow")
+    widget.load_images("C:/Users/vae/Vae Sync/Media/AI/Vae/Outputs")
+    widget.load_images("C:/Users/vae/AI Output")
 
     # Temp assets for testing videos:
     widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
     widget.load_videos("C:/Users/vae/AI Output/video")
+    widget.load_videos("V:/tmp/syncs/furpic/vid")
 
 
     widget.build_layers()
