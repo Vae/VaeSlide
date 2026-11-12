@@ -47,3 +47,6 @@ class ScrollLayer:
         painter.translate(0, self.y)
         self.layout.draw(painter)
         painter.restore()
+
+    def removed(self):
+        self.layout.removed()

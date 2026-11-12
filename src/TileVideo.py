@@ -55,3 +55,7 @@ class TileVideo(Tile):
         if self.scaled_img.isNull():
             return
         painter.drawImage(int(self.x), 0, self.scaled_img)
+
+    def removed(self):
+        self.player.stop()
+        self.scaled_img = None

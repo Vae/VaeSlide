@@ -89,7 +89,7 @@ class EndlessScrollWidget(QWidget):
 
         self._layers: List[ScrollLayer] = [
             ScrollLayer(cfg, self._resourceLoader, self.GAP_PX)
-            for cfg in (layers or generate_layer_configs(6, 0.0))
+            for cfg in (layers or generate_layer_configs(3, 0.0))
         ]
 
         # Background color visible in gaps (if any)
@@ -134,7 +134,7 @@ class EndlessScrollWidget(QWidget):
             #full_path = os.path.join(video_dir, video_file)
             full_path = os.path.join(path_to_videos, video_file)
             width, height = EndlessScrollWidget.get_video_dim(full_path, self._mediaCache)
-            metaTile = MetaTile(weight=Weight(1.0), type="video", json_filename="", resource_filename=full_path, width=width,
+            metaTile = MetaTile(weight=Weight(100.0), type="video", json_filename="", resource_filename=full_path, width=width,
                                 height=height, resource_loader=self._resourceLoader)
             self._meta_tiles.append(metaTile)
 

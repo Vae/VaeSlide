@@ -56,3 +56,6 @@ class Tile:
 
     def set_height(self, target_h: int):
         self._height = target_h
+
+    def removed(self):
+        pass

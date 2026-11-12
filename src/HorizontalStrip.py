@@ -76,7 +76,11 @@ class TileLayout:
         if self._width <= 0 or self._height <= 0:
             return
 
-        self._tiles = [t for t in self._tiles if t.right > 0]
+        for lost_tile in [t for t in self._tiles if t.right <= 0]:
+            lost_tile.removed()
+            self._tiles.remove(lost_tile)
+
+        #self._tiles = [t for t in self._tiles if t.right > 0]
 
         buffer = self._height
         rightmost = max((t.right for t in self._tiles), default=0.0)
@@ -124,3 +128,8 @@ class TileLayout:
     def draw(self, painter: QPainter) -> None:
         for tile in self._tiles:
             tile.draw(painter)
+
+    def removed(self):
+        for tile in self._tiles:
+            tile.removed()
+        self._tiles = []
