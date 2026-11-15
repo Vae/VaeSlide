@@ -12,8 +12,6 @@ Usage:
     python screensaver.py --speed 2.0 # custom scroll speed (px/frame)
 """
 
-import sys
-import os
 import json
 import random
 import argparse
@@ -35,6 +33,30 @@ from src.ScrollLayer import ScrollLayer, LayerConfig
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
+import faulthandler, sys, threading, logging, os
+from PySide6 import QtCore
+
+# Dumps the Python stack of ALL threads on SIGSEGV/SIGABRT/etc.
+_crash_log = open("crash.log", "a", buffering=1)
+faulthandler.enable(file=_crash_log, all_threads=True)
+
+# Optional: dump all stacks every 60s, which helps if it hangs rather than crashes
+# faulthandler.dump_traceback_later(60, repeat=True, file=_crash_log)
+
+# Make sure uncaught exceptions in any thread are logged
+sys.excepthook = lambda *a: logging.critical("Uncaught", exc_info=a)
+threading.excepthook = lambda args: logging.critical(
+    "Uncaught in thread %s", args.thread, exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+# Route Qt's own warnings (which often precede a crash) into your log
+def _qt_handler(mode, ctx, msg):
+    logging.warning("Qt[%s] %s (%s:%s)", mode.name, msg, ctx.file, ctx.line)
+
+QtCore.qInstallMessageHandler(_qt_handler)
+
+# Verbose multimedia logging
+os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=true")
 
 
 def generate_layer_configs(layer_count: int, overlap_multiplier: float) -> List[LayerConfig]:
@@ -132,7 +154,7 @@ class EndlessScrollWidget(QWidget):
 
         for video_file in video_files:
             #full_path = os.path.join(video_dir, video_file)
-            full_path = os.path.join(path_to_videos, video_file)
+            full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
             width, height = EndlessScrollWidget.get_video_dim(full_path, self._mediaCache)
             metaTile = MetaTile(weight=Weight(100.0), type="video", json_filename="", resource_filename=full_path, width=width,
                                 height=height, resource_loader=self._resourceLoader)
@@ -154,8 +176,8 @@ class EndlessScrollWidget(QWidget):
 
         for png_name in png_files:
             base, _ = os.path.splitext(png_name)
-            png_path = os.path.join(path_to_images, png_name)
-            json_path = os.path.join(path_to_images, base + ".json")
+            png_path = os.path.join(path_to_images, png_name).replace('\\', '/')
+            json_path = os.path.join(path_to_images, base + ".json").replace('\\', '/')
 
             weight = Weight(1.0)
             width = 0
@@ -319,17 +341,21 @@ def main() -> None:
     app.setQuitOnLastWindowClosed(True)
 
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
-    #widget.load_assets("secret_assets")
 
-    # Temp assets for testing images:
-    widget.load_images("C:/Users/vae/Desktop/pix/copy/slideshow")
-    widget.load_images("C:/Users/vae/Vae Sync/Media/AI/Vae/Outputs")
-    widget.load_images("C:/Users/vae/AI Output")
+    # Load paths from settings.json
+    assets_path = os.path.join(os.path.dirname("."), "assets.json")
+    try:
+        with open(assets_path, "r", encoding="utf-8") as f:
+            assets_settings = json.load(f)
+    except Exception as e:
+        logger.error(f"Could not load settings.json: {e}")
+        assets_settings = {"image_paths": [], "video_paths": []}
 
-    # Temp assets for testing videos:
-    widget.load_videos("C:/Users/vae/Desktop/pix/copy/slidevid")
-    widget.load_videos("C:/Users/vae/AI Output/video")
-    widget.load_videos("V:/tmp/syncs/furpic/vid")
+    for img_path in assets_settings.get("image_paths", []):
+        widget.load_images(img_path.replace('\\', '/'))
+
+    for vid_path in assets_settings.get("video_paths", []):
+        widget.load_videos(vid_path.replace('\\', '/'))
 
     widget.build_layers()
     widget.show()
