@@ -1,13 +1,58 @@
+import logging
+import os
+
 from PySide6 import QtCore
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 
-from src.Tile import Tile, MetaTile
+from moviepy import VideoFileClip
+
+from src.AssetManager import AssetManager
+from src.MediaCache import MediaCache
+from src.Tile import Tile, MetaTile, Weight
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mkv", ".mov", ".avi"}
 
 from PySide6.QtGui import QPainter, QImage
+logger = logging.getLogger(__name__)
 
+def get_video_dim(file_path: str, media_cache: MediaCache = None):
+    if media_cache:
+        cached = media_cache.get_dimensions(file_path)
+        if cached:
+            return cached
+
+    clip = VideoFileClip(file_path)
+
+    # Get dimensions using .size (returns tuple) or .w and .h
+    width, height = clip.size
+    if media_cache:
+        media_cache.add_dimensions(file_path, width, height)
+    return width, height
+
+class TileVideoAssetManager(AssetManager):
+    """Manages the loading and caching of video assets for TileVideo objects."""
+    def load_assets(self, media_cache: MediaCache, path_to_assets: str) -> list[MetaTile]:
+        path_to_videos = path_to_assets
+        meta_tiles = []
+        video_files = sorted(
+            f for f in os.listdir(path_to_videos)
+            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(
+                ".mov") or f.lower().endswith(".gif")
+        )
+
+        for video_file in video_files:
+            # full_path = os.path.join(video_dir, video_file)
+            full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
+            width, height = get_video_dim(full_path, media_cache)
+            metaTile = MetaTile(weight=Weight(100.0), type="video", json_filename="", resource_filename=full_path,
+                                width=width,
+                                height=height)
+            meta_tiles.append(metaTile)
+
+        logger.info(f"Loaded {len(video_files)} video files from {path_to_videos}")
+        media_cache.save_cache()
+        return meta_tiles
 
 class TileVideo(Tile):
     """Holds the pixmap for a tile and provides a generic draw method."""

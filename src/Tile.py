@@ -22,7 +22,7 @@ class MetaTile:
 
     resource_filename: str
     json_filename: str
-    resource_loader: ResourceLoader
+    resource_loader: ResourceLoader | None = None
 
 
 class Tile:

@@ -13,23 +13,20 @@ Usage:
 """
 
 import json
-import random
 import argparse
 import logging
 from typing import List, Optional
-
-from moviepy import VideoFileClip
 
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtGui import QPainter, QColor, QSurfaceFormat
 from PySide6.QtCore import QTimer, Qt
 
-from PIL import Image
-
 from src.ResourceLoader import ResourceLoader
 from src.Tile import Weight, MetaTile
 from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig
+from src.TileImage import TileImageAssetManager
+from src.TileVideo import TileVideoAssetManager
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -131,85 +128,9 @@ class EndlessScrollWidget(QWidget):
 
         self._video_files = []
 
-    @staticmethod
-    def get_video_dim(file_path: str, media_cache: Optional['MediaCache'] = None):
-        if media_cache:
-            cached = media_cache.get_dimensions(file_path)
-            if cached:
-                return cached
+        self._TileImageAssetManager = TileImageAssetManager()
+        self._TileVideoAssetManager = TileVideoAssetManager()
 
-        clip = VideoFileClip(file_path)
-
-        # Get dimensions using .size (returns tuple) or .w and .h
-        width, height = clip.size
-        if media_cache:
-            media_cache.add_dimensions(file_path, width, height)
-        return width, height
-
-    def load_videos(self, path_to_videos: str):
-        video_files = sorted(
-            f for f in os.listdir(path_to_videos)
-            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(".mov") or f.lower().endswith(".gif")
-        )
-
-        for video_file in video_files:
-            #full_path = os.path.join(video_dir, video_file)
-            full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
-            width, height = EndlessScrollWidget.get_video_dim(full_path, self._mediaCache)
-            metaTile = MetaTile(weight=Weight(100.0), type="video", json_filename="", resource_filename=full_path, width=width,
-                                height=height, resource_loader=self._resourceLoader)
-            self._meta_tiles.append(metaTile)
-
-        logger.info(f"Loaded {len(video_files)} video files from {path_to_videos}")
-        self._mediaCache.save_cache()
-
-    def load_images(self, path_to_images: str) -> None:
-        """Scan ./assets for .png files, read paired .json for weight."""
-        if not os.path.isdir(path_to_images):
-            logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", path_to_images)
-            return
-
-        png_files = sorted(
-            f for f in os.listdir(path_to_images)
-            if f.lower().endswith(".png") or f.lower().endswith(".jpg") or f.lower().endswith(".jpeg")
-        )
-
-        for png_name in png_files:
-            base, _ = os.path.splitext(png_name)
-            png_path = os.path.join(path_to_images, png_name).replace('\\', '/')
-            json_path = os.path.join(path_to_images, base + ".json").replace('\\', '/')
-
-            weight = Weight(1.0)
-            width = 0
-            height = 0
-            if os.path.isfile(json_path):
-                try:
-                    with open(json_path, "r", encoding="utf-8") as fh:
-                        meta = json.load(fh)
-                    weight = Weight(meta.get("weight", 1))
-                    width = meta.get("width", None)
-                    height = meta.get("height", None)
-                except (json.JSONDecodeError, ValueError, OSError) as exc:
-                    logging.warning(f"Bad JSON for {base}.json: {exc} — defaulting weight to 1")
-            else: # fallback requires opening the image and getting the dimensions
-                cached = self._mediaCache.get_dimensions(png_path)
-                if cached:
-                    width, height = cached
-                else:
-                    with Image.open(png_path) as img:
-                        width, height = img.size
-                    self._mediaCache.add_dimensions(png_path, width, height)
-
-            metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, resource_filename=png_path, width=width, height=height, resource_loader=self._resourceLoader)
-            self._meta_tiles.append(metaTile)
-
-        if not self._meta_tiles:
-            logging.error("No valid assets loaded. A black screen will be displayed.")
-
-        random.shuffle(self._meta_tiles)
-
-        logging.info(f"Loaded {len(self._meta_tiles)} assets from '{path_to_images}'.")
-        self._mediaCache.save_cache()
 
     # ------------------------------------------------------------------
     # Window / monitor setup
@@ -312,6 +233,23 @@ class EndlessScrollWidget(QWidget):
     def _shutdown(self) -> None:
         self._timer.stop()
         QApplication.quit()
+
+    def _add_meta_tiles(self, meta_tiles: list[MetaTile]):
+        for meta_tile in meta_tiles:
+            meta_tile.resource_loader = self._resourceLoader
+        self._meta_tiles.extend(meta_tiles)
+
+    def load_images(self, path: str):
+        self._add_meta_tiles(self._TileImageAssetManager.load_assets(self._mediaCache, path))
+
+    def load_videos(self, path: str):
+        self._add_meta_tiles(self._TileVideoAssetManager.load_assets(self._mediaCache, path))
+
+class VaeScroll:
+    def __init__(self):
+        self.media_cache = MediaCache()
+        self.resource_loader = ResourceLoader()
+        #self.endless_scroll_widget = EndlessScrollWidget(self.media_cache, self.resource_loader)
 
 
 # ======================================================================
