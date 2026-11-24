@@ -5,7 +5,7 @@ from PySide6.QtGui import QPainter
 
 from src.ResourceLoader import ResourceLoader
 from src.Tile import MetaTile, Tile
-from src.HorizontalStrip import TileLayout
+from src.HorizontalStrip import HorizontalStrip
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class ScrollLayer:
 
     def __init__(self, config: LayerConfig, resource_loader: ResourceLoader, gap_px: int = -1):
         self.config = config
-        self.layout = TileLayout(resource_loader, gap_px)
+        self.layout = HorizontalStrip(resource_loader, gap_px)
         self.y = 0
 
     def set_meta_tiles(self, meta_tiles: List[MetaTile]) -> None:

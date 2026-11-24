@@ -29,8 +29,7 @@ from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig
 from src.TileImage import TileImageAssetManager
 from src.TileVideo import TileVideoAssetManager
-
-ARCHIVE_ON_MIDDLE_CLICK = True
+from src.Settings import get_settings
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -104,6 +103,7 @@ class EndlessScrollWidget(QWidget):
 
         self._fullscreen = fullscreen
         self._speed = speed
+        self._settings = get_settings()
         self._resourceLoader = ResourceLoader()
         self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
 
@@ -222,12 +222,27 @@ class EndlessScrollWidget(QWidget):
             if tile and event.button() == Qt.LeftButton:
                 print(f"Clicked tile: {tile.meta_tile.resource_filename}")
                 return
-            if ARCHIVE_ON_MIDDLE_CLICK and tile and event.button() == Qt.MiddleButton and Path(tile.meta_tile.resource_filename).is_file:
-                print(f"Archived asset: {tile.meta_tile.resource_filename}")
-                shutil.move(tile.meta_tile.resource_filename, "C:/Users/vae/Desktop/pix/del")
+            if (tile and event.button() == Qt.MiddleButton
+                    and self._settings.get("archive on middle click")
+                    and Path(tile.meta_tile.resource_filename).is_file()):
+                self._archive(tile.meta_tile.resource_filename)
                 return
 
         self._shutdown()
+
+    def _archive(self, filename: str) -> None:
+        """Move an asset into the archive directory configured in settings.json."""
+        archive_dir = self._settings.get("archive directory")
+        if not archive_dir:
+            logger.warning("Cannot archive %s: no \"archive directory\" set in settings.json.", filename)
+            return
+        try:
+            # Without this, moving into a missing directory would rename the file instead
+            os.makedirs(archive_dir, exist_ok=True)
+            shutil.move(filename, archive_dir)
+            logger.info("Archived asset: %s -> %s", filename, archive_dir)
+        except (OSError, shutil.Error) as e:
+            logger.error("Failed to archive %s to %s: %s", filename, archive_dir, e)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         self._shutdown()

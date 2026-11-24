@@ -14,7 +14,7 @@ from src.TileVideo import TileVideo
 logger = logging.getLogger(__name__)
 
 
-class TileLayout:
+class HorizontalStrip:
     """
     Lays out one horizontal strip of tiles and scrolls it endlessly.
 
