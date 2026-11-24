@@ -9,7 +9,7 @@ containing a "weight" field that controls how frequently it appears.
 Usage:
     python screensaver.py             # fullscreen across all monitors
     python screensaver.py --window    # windowed mode for testing
-    python screensaver.py --speed 2.0 # multiply every layer's speed (set in settings.json)
+    python screensaver.py --speed 2.0 # override "global speed" from settings.json
 """
 
 import json
@@ -77,14 +77,15 @@ class EndlessScrollWidget(QWidget):
     the previous layer by a percentage of the screen height.
     """
 
-    GAP_PX = -1  # gap between tiles (0 = seamless)
-
-    def __init__(self, fullscreen: bool, speed_scale: float = 1.0, layers: Optional[List[LayerConfig]] = None):
+    def __init__(self, fullscreen: bool, speed_scale: Optional[float] = None,
+                 layers: Optional[List[LayerConfig]] = None):
         super().__init__()
 
         self._fullscreen = fullscreen
-        self._speed_scale = speed_scale
         self._settings = get_settings()
+        # Multiplier on every layer's speed; an explicit argument overrides settings.json
+        self._speed_scale = speed_scale if speed_scale is not None else self._settings.get_number("global speed")
+        gap_px = self._settings.get_number("tile gap", int)
         self._resourceLoader = ResourceLoader()
         self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
 
@@ -92,7 +93,7 @@ class EndlessScrollWidget(QWidget):
         self._meta_tiles: List[MetaTile] = []
 
         self._layers: List[ScrollLayer] = [
-            ScrollLayer(cfg, self._resourceLoader, self.GAP_PX)
+            ScrollLayer(cfg, self._resourceLoader, gap_px)
             for cfg in (layers or load_layer_configs())
         ]
 
@@ -263,8 +264,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
                         help="Run in a window instead of fullscreen (for testing)")
-    parser.add_argument("--speed", type=float, default=1.0,
-                        help="Multiplier applied to every layer's speed from settings.json (default: 1.0)")
+    parser.add_argument("--speed", type=float, default=None,
+                        help="Override \"global speed\" from settings.json (multiplier on every layer's speed)")
     args = parser.parse_args()
 
     fullscreen = not args.window

@@ -19,6 +19,8 @@ class Settings:
     DEFAULTS: dict[str, Any] = {
         "archive on middle click": True,
         "archive directory": None,  # must be set in settings.json for archiving to work
+        "global speed": 1.0,  # multiplier applied to every layer's speed
+        "tile gap": -1,       # px between tiles (0 = seamless, negative = overlap)
         # Parallax layers, back to front. speed is in px/frame; overlap is a
         # fraction of screen height covered over the previous layer.
         "layers": [
@@ -54,6 +56,18 @@ class Settings:
     def get(self, key: str, default: Any = None) -> Any:
         """Return a setting; `default` is used only if the key has no built-in default either."""
         return self._values.get(key, default)
+
+    def get_number(self, key: str, cast: type = float) -> Any:
+        """Return a numeric setting converted with `cast`, falling back to DEFAULTS if invalid."""
+        value = self._values.get(key)
+        try:
+            if isinstance(value, bool):
+                raise TypeError("booleans are not numbers")
+            return cast(value)
+        except (TypeError, ValueError):
+            default = self.DEFAULTS[key]
+            logger.error("Setting \"%s\" must be a number, got %r. Using default %r.", key, value, default)
+            return cast(default)
 
     def __getitem__(self, key: str) -> Any:
         return self._values[key]
