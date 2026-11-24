@@ -22,6 +22,7 @@ class Settings:
         "global speed": 1.0,  # multiplier applied to every layer's speed
         "tile gap": -1,       # px between tiles (0 = seamless, negative = overlap)
         "wheel speed step": 0.25,  # px/frame added or removed per mouse wheel notch
+        "tile swap seconds": 10.0,  # on-screen time before a tile swaps to a same-aspect asset; <= 0 disables
         # Parallax layers, back to front. speed is in px/frame; overlap is a
         # fraction of screen height covered over the previous layer.
         "layers": [

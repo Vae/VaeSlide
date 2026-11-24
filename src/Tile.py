@@ -34,6 +34,8 @@ class Tile:
         self.x = x
         self.meta_tile = meta_tile
         self._height = h
+        # time.monotonic() when the tile last came on screen; None while off screen
+        self.visible_since: float | None = None
 
     def draw(self, painter: QPainter):
         pass

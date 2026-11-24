@@ -86,6 +86,7 @@ class EndlessScrollWidget(QWidget):
         # Multiplier on every layer's speed; an explicit argument overrides settings.json
         self._speed_scale = speed_scale if speed_scale is not None else self._settings.get_number("global speed")
         gap_px = self._settings.get_number("tile gap", int)
+        swap_seconds = self._settings.get_number("tile swap seconds")
         self._resourceLoader = ResourceLoader()
         self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
 
@@ -93,7 +94,7 @@ class EndlessScrollWidget(QWidget):
         self._meta_tiles: List[MetaTile] = []
 
         self._layers: List[ScrollLayer] = [
-            ScrollLayer(cfg, self._resourceLoader, gap_px)
+            ScrollLayer(cfg, self._resourceLoader, gap_px, swap_seconds)
             for cfg in (layers or load_layer_configs())
         ]
 

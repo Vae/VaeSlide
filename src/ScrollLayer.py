@@ -50,9 +50,10 @@ def parse_layer_configs(raw: Any) -> List[LayerConfig]:
 class ScrollLayer:
     """One parallax layer: a TileLayout, a vertical offset and a speed."""
 
-    def __init__(self, config: LayerConfig, resource_loader: ResourceLoader, gap_px: int = -1):
+    def __init__(self, config: LayerConfig, resource_loader: ResourceLoader, gap_px: int = -1,
+                 swap_seconds: float = 0.0):
         self.config = config
-        self.layout = HorizontalStrip(resource_loader, gap_px)
+        self.layout = HorizontalStrip(resource_loader, gap_px, swap_seconds)
         self.y = 0
         self.height = 0
         # Current speed in px/frame; starts at config.speed and can change at runtime
