@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 
 from PySide6.QtGui import QPainter
 
-from src.ResourceLoader import ResourceLoader
+from src.AssetLoader import AssetLoader
 from src.Tile import MetaTile, Tile
 from src.HorizontalStrip import HorizontalStrip
 
@@ -50,10 +50,10 @@ def parse_layer_configs(raw: Any) -> List[LayerConfig]:
 class ScrollLayer:
     """One parallax layer: a TileLayout, a vertical offset and a speed."""
 
-    def __init__(self, config: LayerConfig, resource_loader: ResourceLoader, gap_px: int = -1,
+    def __init__(self, config: LayerConfig, asset_loader: AssetLoader, gap_px: int = -1,
                  swap_seconds: float = 0.0, swap_edge_margin: float = 0.0):
         self.config = config
-        self.layout = HorizontalStrip(resource_loader, gap_px, swap_seconds, swap_edge_margin)
+        self.layout = HorizontalStrip(asset_loader, gap_px, swap_seconds, swap_edge_margin)
         self.y = 0
         self.height = 0
         # Current speed in px/frame; starts at config.speed and can change at runtime

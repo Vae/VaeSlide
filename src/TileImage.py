@@ -1,13 +1,15 @@
 import json
 import os
 import logging
+from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QPixmap, QPainter, QImage
 import numpy as np
 
 from PIL import Image
 
+from src.AssetLoader import AssetLoader
 from src.AssetManager import AssetManager
 from src.MediaCache import MediaCache
 from src.Tile import MetaTile, Tile, Weight
@@ -15,14 +17,15 @@ from src.Tile import MetaTile, Tile, Weight
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".xpm"}
 logger = logging.getLogger(__name__)
 
-def _make_white_transparent(pixmap: QPixmap) -> QPixmap:
-    if pixmap.isNull():
-        return pixmap
+def _make_white_transparent(source: QImage) -> QImage:
+    """Make pure-white pixels transparent. Safe to run on a worker thread."""
+    if source.isNull():
+        return source
 
-    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    image = source.convertToFormat(QImage.Format.Format_ARGB32)
     width, height = image.width(), image.height()
     if width == 0 or height == 0:
-        return pixmap
+        return source
 
     stride = image.bytesPerLine()
     if stride == width * 4:
@@ -45,7 +48,7 @@ def _make_white_transparent(pixmap: QPixmap) -> QPixmap:
                 if r == 255 and g == 255 and b == 255:
                     image.setPixel(x, y, 0x00FFFFFF)
 
-    return QPixmap.fromImage(image)
+    return image
 
 class TileImageAssetManager(AssetManager):
     """Manages loading and caching of tile assets."""
@@ -66,7 +69,7 @@ class TileImageAssetManager(AssetManager):
             png_path = os.path.join(path_to_images, png_name).replace('\\', '/')
             json_path = os.path.join(path_to_images, base + ".json").replace('\\', '/')
 
-            weight = Weight(1.0)
+            weight = Weight(500.0)
             width = 0
             height = 0
             if os.path.isfile(json_path):
@@ -99,25 +102,56 @@ class TileImageAssetManager(AssetManager):
 
 
 class TileImage(Tile):
-    """Holds the pixmap for a tile and provides a generic draw method."""
+    """
+    An image tile. The scaled image loads in the background on the
+    AssetLoader's worker threads. Until it arrives, the tile takes up its
+    slot in the layout but draws nothing.
+    """
 
-    def __init__(self, meta_tile: MetaTile, x: float, h: int, pixmap: QPixmap):
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, asset_loader: AssetLoader):
         self._masking_enabled = False
         super().__init__(meta_tile=meta_tile, x=x, h=h)
-        if self._masking_enabled:
-            self._pixmap = _make_white_transparent(pixmap)
-        else:
-            self._pixmap = pixmap
+        self._asset_loader = asset_loader
+        self._pixmap: Optional[QPixmap] = None
+        self._removed = False
+        self._request_pixmap()
+
+    def _request_pixmap(self) -> None:
+        requested_h = self._height
+        self._asset_loader.request_scaled_image(
+            self.meta_tile.resource_filename,
+            requested_h,
+            lambda image: self._on_image_loaded(image, requested_h),
+            transform=_make_white_transparent if self._masking_enabled else None,
+        )
+
+    def _on_image_loaded(self, image: Optional[QImage], requested_h: int) -> None:
+        """Runs on the GUI thread (via AssetLoader.process_completed)."""
+        if self._removed or requested_h != self._height:
+            return  # tile is gone, or a newer request for another height is pending
+        if image is None:
+            self.load_failed = True
+            return
+        self._pixmap = QPixmap.fromImage(image)
+
+    def is_ready(self) -> bool:
+        return self._pixmap is not None
 
     def set_height(self, target_h: int):
+        if target_h == self._height and self._pixmap is not None:
+            return
         self._height = target_h
-        if self._masking_enabled:
-            self._pixmap = _make_white_transparent(
-                self.meta_tile.resource_loader.get_pixmap(self.meta_tile.resource_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
-            )
-        else:
-            self._pixmap = self.meta_tile.resource_loader.get_pixmap(self.meta_tile.resource_filename).scaledToHeight(target_h, Qt.SmoothTransformation)
+        self._request_pixmap()  # keep drawing the old pixmap, stretched, until it arrives
 
     def draw(self, painter: QPainter) -> None:
         """Draw this tile image at position (x, y) on the given painter."""
-        painter.drawPixmap(int(self.x), 0, self._pixmap)
+        if self._pixmap is None:
+            return
+        if self._pixmap.height() == self._height:
+            painter.drawPixmap(int(self.x), 0, self._pixmap)
+        else:
+            painter.drawPixmap(QRect(int(self.x), 0, self.width, self._height), self._pixmap)
+
+    def removed(self):
+        self._removed = True
+        self._pixmap = None

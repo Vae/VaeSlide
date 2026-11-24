@@ -1,9 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
 
-from PySide6.QtGui import QPixmap, QPainter
-
-from src.ResourceLoader import ResourceLoader
+from PySide6.QtGui import QPainter
 
 
 @dataclass
@@ -22,7 +20,6 @@ class MetaTile:
 
     resource_filename: str
     json_filename: str
-    resource_loader: ResourceLoader | None = None
 
 
 class Tile:
@@ -36,6 +33,12 @@ class Tile:
         self._height = h
         # time.monotonic() when the tile last came on screen; None while off screen
         self.visible_since: float | None = None
+        # Set when the tile's asset could not be loaded; it will never become ready
+        self.load_failed = False
+
+    def is_ready(self) -> bool:
+        """True once the tile has content to draw (assets load asynchronously)."""
+        return True
 
     def draw(self, painter: QPainter):
         pass

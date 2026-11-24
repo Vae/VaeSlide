@@ -5,10 +5,9 @@ import time
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter
 
-from src.ResourceLoader import ResourceLoader
+from src.AssetLoader import AssetLoader
 from src.Tile import MetaTile, Tile, Weight
 from src.TileImage import TileImage
 from src.TileVideo import TileVideo
@@ -36,7 +35,7 @@ class HorizontalStrip:
     layouts can run side by side without affecting each other.
     """
 
-    def __init__(self, resource_loader: ResourceLoader, gap_px: int = -1, swap_seconds: float = 0.0,
+    def __init__(self, asset_loader: AssetLoader, gap_px: int = -1, swap_seconds: float = 0.0,
                  swap_edge_margin: float = 0.0):
         """
         swap_seconds:     a tile that has been on screen this long is swapped for
@@ -44,7 +43,7 @@ class HorizontalStrip:
         swap_edge_margin: tiles must be fully on screen and at least this many px
                           from both screen edges to be swapped.
         """
-        self._resource_loader = resource_loader
+        self._asset_loader = asset_loader
         self._gap_px = gap_px
         self._swap_seconds = swap_seconds
         self._swap_edge_margin = swap_edge_margin
@@ -52,6 +51,8 @@ class HorizontalStrip:
         # Meta tiles grouped by reduced aspect ratio (w, h), used for swapping
         self._by_aspect: Dict[Tuple[int, int], List[MetaTile]] = {}
         self._tiles: List[Tile] = []
+        # Swaps waiting for the replacement's asset to load: old tile -> new tile
+        self._pending_swaps: Dict[Tile, Tile] = {}
         self._width = 0
         self._height = 0
         # Sign of the last scroll: >0 tiles move left, <0 tiles move right
@@ -70,7 +71,7 @@ class HorizontalStrip:
             key = _aspect_key(mt)
             if key is not None:
                 self._by_aspect.setdefault(key, []).append(mt)
-        self._tiles.clear()
+        self.removed()
         self.cull_and_fill()
 
     @property
@@ -83,7 +84,12 @@ class HorizontalStrip:
     @staticmethod
     def _weighted_pick(candidates: List[MetaTile]) -> MetaTile:
         weights = [mt.weight.value for mt in candidates]
-        mt = random.choices(candidates, weights=weights, k=1)[0]
+        if sum(weights) > 0:
+            mt = random.choices(candidates, weights=weights, k=1)[0]
+        else:
+            # All weights are 0: failed loads, or float underflow after a long
+            # run of halving. random.choices would raise, so pick uniformly.
+            mt = random.choice(candidates)
         mt.weight.value /= 2
         return mt
 
@@ -94,10 +100,8 @@ class HorizontalStrip:
 
     def _create_tile(self, meta_tile: MetaTile, x: float) -> Optional[Tile]:
         if meta_tile.type == "image":
-            pixmap = self._resource_loader.get_pixmap(meta_tile.resource_filename)
-            if pixmap:
-                scaled = pixmap.scaledToHeight(self._height, Qt.SmoothTransformation)
-                return TileImage(meta_tile=meta_tile, x=x, h=self._height, pixmap=scaled)
+            # Returns immediately; the image loads on the asset_loader threads
+            return TileImage(meta_tile=meta_tile, x=x, h=self._height, asset_loader=self._asset_loader)
         if meta_tile.type == "video":
             return TileVideo(video_filename=meta_tile.resource_filename, x=x,
                              h=self._height, meta_tile=meta_tile)
@@ -120,6 +124,11 @@ class HorizontalStrip:
         """
         if self._width <= 0 or self._height <= 0:
             return
+
+        # Stop picking assets that failed to load (e.g. a file that was archived)
+        for tile in self._tiles:
+            if tile.load_failed:
+                tile.meta_tile.weight.value = 0.0
 
         buffer = self._height
         scrolling_right = self._direction < 0
@@ -159,6 +168,11 @@ class HorizontalStrip:
         self._width = width
         self._height = height
 
+        # Pending replacements were requested at the old height; drop them
+        for new_tile in self._pending_swaps.values():
+            new_tile.removed()
+        self._pending_swaps.clear()
+
         if not self._tiles:
             self.cull_and_fill()
             return
@@ -192,12 +206,18 @@ class HorizontalStrip:
         """
         Replace tiles that have been visible for longer than swap_seconds with
         a different asset of the same aspect ratio, so neighbours don't move.
+
+        The replacement loads in the background. The old tile stays on screen
+        until the replacement is ready (see _complete_pending_swaps).
         """
+        self._complete_pending_swaps()
         if self._swap_seconds <= 0:
             return
 
         now = time.monotonic()
-        for i, tile in enumerate(self._tiles):
+        for tile in self._tiles:
+            if tile in self._pending_swaps:
+                continue
             if tile.right <= 0 or tile.x >= self._width:
                 tile.visible_since = None  # off screen: restart the clock when it comes back
                 continue
@@ -224,13 +244,32 @@ class HorizontalStrip:
                 continue
 
             new_tile = self._create_tile(self._weighted_pick(candidates), tile.x)
-            if new_tile is None:
+            if new_tile is not None:
+                self._pending_swaps[tile] = new_tile
+
+    def _complete_pending_swaps(self) -> None:
+        """Put replacement tiles in place once their assets have loaded."""
+        if not self._pending_swaps:
+            return
+        index_of = {id(t): i for i, t in enumerate(self._tiles)}
+        for old_tile, new_tile in list(self._pending_swaps.items()):
+            i = index_of.get(id(old_tile))
+            if i is None or new_tile.load_failed:
+                # Old tile was culled before the replacement loaded, or the load failed
+                if new_tile.load_failed:
+                    new_tile.meta_tile.weight.value = 0.0
+                new_tile.removed()
+                del self._pending_swaps[old_tile]
                 continue
-            new_tile.visible_since = now
-            tile.removed()
+            if not new_tile.is_ready():
+                continue
+            new_tile.x = old_tile.x  # the old tile kept scrolling while we waited
+            new_tile.visible_since = time.monotonic()
+            old_tile.removed()
             self._tiles[i] = new_tile
+            del self._pending_swaps[old_tile]
             logger.debug("Swapped tile %s -> %s",
-                         old_meta.resource_filename, new_tile.meta_tile.resource_filename)
+                         old_tile.meta_tile.resource_filename, new_tile.meta_tile.resource_filename)
 
     def hit_test(self, x: float, y: float) -> Optional[Tile]:
         """Check if the given (x, y) coordinates are within any tile in this layout."""
@@ -247,3 +286,6 @@ class HorizontalStrip:
         for tile in self._tiles:
             tile.removed()
         self._tiles = []
+        for new_tile in self._pending_swaps.values():
+            new_tile.removed()
+        self._pending_swaps.clear()

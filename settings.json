@@ -6,7 +6,11 @@
   "wheel speed step": 0.25,
   "tile swap seconds": 10,
   "tile swap edge margin": 100,
+  "asset loader threads": 2,
   "layers": [
+    { "speed": -2.5,  "overlap": 0.0 },
+    { "speed": -2.5,  "overlap": 0.0 },
+    { "speed": -2.5,  "overlap": 0.0 },
     { "speed": -2.5,  "overlap": 0.0 },
     { "speed": 2.0,  "overlap": 0.0 }
   ]

@@ -24,6 +24,7 @@ from PySide6.QtGui import QPainter, QColor, QSurfaceFormat
 from PySide6.QtCore import QTimer, Qt
 
 from src.ResourceLoader import ResourceLoader
+from src.AssetLoader import AssetLoader
 from src.Tile import Weight, MetaTile
 from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig, parse_layer_configs
@@ -89,13 +90,18 @@ class EndlessScrollWidget(QWidget):
         swap_seconds = self._settings.get_number("tile swap seconds")
         swap_edge_margin = self._settings.get_number("tile swap edge margin")
         self._resourceLoader = ResourceLoader()
+        # Image decoding and scaling run on this pool so the GUI thread never blocks on disk
+        self._asset_loader = AssetLoader(self._resourceLoader,
+                                         self._settings.get_number("asset loader threads", int))
+        # Covers every way out (window close, any-key quit) so queued loads are dropped
+        QApplication.instance().aboutToQuit.connect(self._asset_loader.shutdown)
         self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
 
         # Master list; each layer receives its own copy in build_layers()
         self._meta_tiles: List[MetaTile] = []
 
         self._layers: List[ScrollLayer] = [
-            ScrollLayer(cfg, self._resourceLoader, gap_px, swap_seconds, swap_edge_margin)
+            ScrollLayer(cfg, self._asset_loader, gap_px, swap_seconds, swap_edge_margin)
             for cfg in (layers or load_layer_configs())
         ]
 
@@ -170,6 +176,8 @@ class EndlessScrollWidget(QWidget):
     # Animation loop
     # ------------------------------------------------------------------
     def _tick(self) -> None:
+        # Hand finished background loads to their tiles before moving anything
+        self._asset_loader.process_completed()
         for layer in self._layers:
             layer.tick(self._speed_scale)
         self.update()  # trigger repaint
@@ -255,10 +263,8 @@ class EndlessScrollWidget(QWidget):
         self._timer.stop()
         QApplication.quit()
 
-    def _add_meta_tiles(self, meta_tiles: list[MetaTile]):
-        for meta_tile in meta_tiles:
-            meta_tile.resource_loader = self._resourceLoader
-        self._meta_tiles.extend(meta_tiles)
+    def _add_meta_tiles(self, meta_tiles: Optional[list[MetaTile]]):
+        self._meta_tiles.extend(meta_tiles or [])
 
     def load_images(self, path: str):
         self._add_meta_tiles(self._TileImageAssetManager.load_assets(self._mediaCache, path))

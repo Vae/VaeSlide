@@ -45,7 +45,7 @@ class TileVideoAssetManager(AssetManager):
             # full_path = os.path.join(video_dir, video_file)
             full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
             width, height = get_video_dim(full_path, media_cache)
-            metaTile = MetaTile(weight=Weight(100.0), type="video", json_filename="", resource_filename=full_path,
+            metaTile = MetaTile(weight=Weight(500.0), type="video", json_filename="", resource_filename=full_path,
                                 width=width,
                                 height=height)
             meta_tiles.append(metaTile)
@@ -96,8 +96,11 @@ class TileVideo(Tile):
                     QtCore.Qt.TransformationMode.FastTransformation
                 )
 
+    def is_ready(self) -> bool:
+        return self.scaled_img is not None and not self.scaled_img.isNull()
+
     def draw(self, painter: QPainter) -> None:
-        if self.scaled_img.isNull():
+        if self.scaled_img is None or self.scaled_img.isNull():
             return
         painter.drawImage(int(self.x), 0, self.scaled_img)
 
