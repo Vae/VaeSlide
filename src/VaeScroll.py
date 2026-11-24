@@ -227,7 +227,21 @@ class EndlessScrollWidget(QWidget):
             logger.error("Failed to archive %s to %s: %s", filename, archive_dir, e)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
-        self._shutdown()
+        """Wheel up speeds up the layer under the cursor; wheel down slows it down."""
+        notches = event.angleDelta().y() / 120.0  # 120 = one standard wheel notch
+        if notches == 0:
+            return
+
+        y = event.position().y()
+        # Front to back, so the visible layer wins where layers overlap
+        for index in reversed(range(len(self._layers))):
+            layer = self._layers[index]
+            if layer.contains_y(y):
+                old_speed = layer.speed
+                layer.adjust_speed(notches * self._settings.get_number("wheel speed step"))
+                logger.info("Layer %d speed: %.2f -> %.2f px/frame (x%.2f global speed)",
+                            index, old_speed, layer.speed, self._speed_scale)
+                return
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         self._shutdown()

@@ -54,16 +54,32 @@ class ScrollLayer:
         self.config = config
         self.layout = HorizontalStrip(resource_loader, gap_px)
         self.y = 0
+        self.height = 0
+        # Current speed in px/frame; starts at config.speed and can change at runtime
+        self.speed = config.speed
 
     def set_meta_tiles(self, meta_tiles: List[MetaTile]) -> None:
         self.layout.set_meta_tiles(meta_tiles)
 
     def set_geometry(self, y: int, width: int, height: int) -> None:
         self.y = y
+        self.height = height
         self.layout.resize(width, height)
 
+    def contains_y(self, y: float) -> bool:
+        """True if the widget-space y coordinate falls inside this layer's band."""
+        return self.y <= y < self.y + self.height
+
+    def adjust_speed(self, amount: float) -> None:
+        """
+        Speed up (amount > 0) or slow down (amount < 0) in the layer's configured
+        direction. Slowing down past zero reverses the layer.
+        """
+        direction = -1.0 if self.config.speed < 0 else 1.0
+        self.speed += amount * direction
+
     def tick(self, speed_scale: float = 1.0) -> None:
-        self.layout.scroll(self.config.speed * speed_scale)
+        self.layout.scroll(self.speed * speed_scale)
 
     def hit_test(self, x: float, y: float) -> Optional[Tile]:
         """Check if the given (x, y) coordinates are within any tile in this layer."""

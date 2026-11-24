@@ -21,6 +21,7 @@ class Settings:
         "archive directory": None,  # must be set in settings.json for archiving to work
         "global speed": 1.0,  # multiplier applied to every layer's speed
         "tile gap": -1,       # px between tiles (0 = seamless, negative = overlap)
+        "wheel speed step": 0.25,  # px/frame added or removed per mouse wheel notch
         # Parallax layers, back to front. speed is in px/frame; overlap is a
         # fraction of screen height covered over the previous layer.
         "layers": [
