@@ -1,12 +1,12 @@
 {
   "image_paths": [
-    "C:/Users/vae/Desktop/pix/copy/slideshow",
+    "#C:/Users/vae/Desktop/pix/copy/slideshow",
     "C:/Users/vae/Vae Sync/Media/AI/Vae/Outputs",
-    "C:/Users/vae/AI Output"
+    "#C:/Users/vae/AI Output"
   ],
   "video_paths": [
-    "C:/Users/vae/Desktop/pix/copy/slidevid",
-    "C:/Users/vae/AI Output/video",
-    "V:/tmp/syncs/furpic/vid"
+    "#C:/Users/vae/Desktop/pix/copy/slidevid",
+    "#C:/Users/vae/AI Output/video",
+    "#V:/tmp/syncs/furpic/vid"
   ]
 }

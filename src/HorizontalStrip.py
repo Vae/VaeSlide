@@ -51,7 +51,7 @@ class TileLayout:
     def _weighted_pick(self) -> MetaTile:
         weights = [mt.weight.value for mt in self._meta_tiles]
         mt = random.choices(self._meta_tiles, weights=weights, k=1)[0]
-        mt.weight.value -= 1
+        mt.weight.value /= 2
         return mt
 
     def _spawn_tile(self, x: float) -> Optional[Tile]:

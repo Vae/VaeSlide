@@ -15,6 +15,8 @@ Usage:
 import json
 import argparse
 import logging
+import shutil
+from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtWidgets import QApplication, QWidget
@@ -27,6 +29,8 @@ from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig
 from src.TileImage import TileImageAssetManager
 from src.TileVideo import TileVideoAssetManager
+
+ARCHIVE_ON_MIDDLE_CLICK = True
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -54,7 +58,7 @@ QtCore.qInstallMessageHandler(_qt_handler)
 
 # Verbose multimedia logging
 os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=true")
-
+os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
 def generate_layer_configs(layer_count: int, overlap_multiplier: float) -> List[LayerConfig]:
     """
@@ -215,8 +219,12 @@ class EndlessScrollWidget(QWidget):
         # Hit test all layers from front to back
         for layer in reversed(self._layers):
             tile = layer.hit_test(event.position().x(), event.position().y())
-            if tile:
+            if tile and event.button() == Qt.LeftButton:
                 print(f"Clicked tile: {tile.meta_tile.resource_filename}")
+                return
+            if ARCHIVE_ON_MIDDLE_CLICK and tile and event.button() == Qt.MiddleButton and Path(tile.meta_tile.resource_filename).is_file:
+                print(f"Archived asset: {tile.meta_tile.resource_filename}")
+                shutil.move(tile.meta_tile.resource_filename, "C:/Users/vae/Desktop/pix/del")
                 return
 
         self._shutdown()
@@ -256,7 +264,7 @@ class VaeScroll:
 # Entry point
 # ======================================================================
 def main() -> None:
-    default_speed = 1.0
+    default_speed = 2.0
 
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
@@ -290,10 +298,12 @@ def main() -> None:
         assets_settings = {"image_paths": [], "video_paths": []}
 
     for img_path in assets_settings.get("image_paths", []):
-        widget.load_images(img_path.replace('\\', '/'))
+        if Path(img_path).is_dir and not img_path.startswith("#"):
+            widget.load_images(img_path.replace('\\', '/'))
 
     for vid_path in assets_settings.get("video_paths", []):
-        widget.load_videos(vid_path.replace('\\', '/'))
+        if Path(vid_path).is_dir and not vid_path.startswith("#"):
+            widget.load_videos(vid_path.replace('\\', '/'))
 
     widget.build_layers()
     widget.show()
