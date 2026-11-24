@@ -40,6 +40,18 @@ class Tile:
         """True once the tile has content to draw (assets load asynchronously)."""
         return True
 
+    def swap_seconds(self, default: float) -> float:
+        """
+        On-screen seconds before this tile is swapped; <= 0 means never.
+        `default` is the strip's top-level "tile swap seconds". Subclasses
+        can override it with a value from their own settings section.
+        """
+        return default
+
+    def can_swap(self) -> bool:
+        """False while the tile must not be swapped out yet (e.g. a video mid-playthrough)."""
+        return True
+
     def draw(self, painter: QPainter):
         pass
 

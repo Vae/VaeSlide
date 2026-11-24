@@ -211,12 +211,14 @@ class HorizontalStrip:
         until the replacement is ready (see _complete_pending_swaps).
         """
         self._complete_pending_swaps()
-        if self._swap_seconds <= 0:
-            return
 
         now = time.monotonic()
         for tile in self._tiles:
             if tile in self._pending_swaps:
+                continue
+            # Per tile type: videos use "tile video" -> "tile swap seconds"
+            swap_seconds = tile.swap_seconds(self._swap_seconds)
+            if swap_seconds <= 0:
                 continue
             if tile.right <= 0 or tile.x >= self._width:
                 tile.visible_since = None  # off screen: restart the clock when it comes back
@@ -224,12 +226,16 @@ class HorizontalStrip:
             if tile.visible_since is None:
                 tile.visible_since = now
                 continue
-            if now - tile.visible_since < self._swap_seconds:
+            if now - tile.visible_since < swap_seconds:
                 continue
             # Don't swap tiles that are near or past an edge. The clock keeps
             # running, so an entering tile swaps once it is far enough in.
             margin = self._swap_edge_margin
             if tile.x < margin or tile.right > self._width - margin:
+                continue
+            # Videos must finish a full playthrough first; the clock keeps running
+            # so the swap happens as soon as the video finishes
+            if not tile.can_swap():
                 continue
 
             # Restart the clock either way, so a tile with no match isn't re-checked every frame

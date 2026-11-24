@@ -9,9 +9,11 @@ from moviepy import VideoFileClip
 
 from src.AssetManager import AssetManager
 from src.MediaCache import MediaCache
+from src.Settings import get_settings
 from src.Tile import Tile, MetaTile, Weight
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mkv", ".mov", ".avi"}
+SETTINGS_SECTION = "tile video"  # this module's section in settings.json
 
 from PySide6.QtGui import QPainter, QImage
 logger = logging.getLogger(__name__)
@@ -61,6 +63,7 @@ class TileVideo(Tile):
         super().__init__(meta_tile=meta_tile, x=x, h=h)
 
         self._videoFilePath = video_filename
+        self._swap_seconds = get_settings().section(SETTINGS_SECTION).get_number("tile swap seconds")
 
         self.scaled_img = QImage()
         self.player = QMediaPlayer()
@@ -71,6 +74,14 @@ class TileVideo(Tile):
 
         # Connect frame updates to our processing method
         self.video_sink.videoFrameChanged.connect(self.process_frame)
+
+        # Track whether the video has played all the way through at least once,
+        # so it isn't swapped out mid-playback (see can_swap)
+        self.played_once = False
+        self._last_position = 0
+        self.player.positionChanged.connect(self._on_position_changed)
+        self.player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self.player.errorOccurred.connect(self._on_error)
 
         # Load and play source
         self.player.setSource(QUrl.fromLocalFile(video_filename))
@@ -95,6 +106,31 @@ class TileVideo(Tile):
                     QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     QtCore.Qt.TransformationMode.FastTransformation
                 )
+
+    def _on_position_changed(self, position: int) -> None:
+        # Playback loops forever (setLoops(-1)), so a full playthrough shows up
+        # as the position jumping back towards the start.
+        if position < self._last_position:
+            if not self.played_once:
+                logger.debug("Video played through once: %s", self._videoFilePath)
+            self.played_once = True
+        self._last_position = position
+
+    def _on_media_status_changed(self, status) -> None:
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.played_once = True
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.played_once = True  # will never play; don't block swapping
+
+    def _on_error(self, error, error_string: str) -> None:
+        logger.warning("Video error for %s: %s", self._videoFilePath, error_string)
+        self.played_once = True  # don't keep a broken video on screen forever
+
+    def swap_seconds(self, default: float) -> float:
+        return self._swap_seconds  # from settings.json "tile video" section
+
+    def can_swap(self) -> bool:
+        return self.played_once
 
     def is_ready(self) -> bool:
         return self.scaled_img is not None and not self.scaled_img.isNull()
