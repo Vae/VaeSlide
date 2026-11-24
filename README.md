@@ -1,4 +1,4 @@
-# VaeScroll: More than a slideshow, a sliding slideshow!
+# VaeScroll: Not just a slideshow, a sliding slideshow!
 
 Basically it's a scrolling screensaver implemented in Python using PySide6.
 

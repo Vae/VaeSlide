@@ -16,6 +16,6 @@
   ],
   "tile video": {
     "tile swap seconds": 90,
-    "weight per loaded video": 2.0
+    "weight per loaded video": 0.97
   }
 }
