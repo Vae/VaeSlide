@@ -41,6 +41,15 @@ class Tile:
         return True
 
     @classmethod
+    def can_select(cls, replacing: "Tile | None" = None) -> bool:
+        """
+        Hard limit: False if no new tile of this type may be created right now.
+        `replacing` is a tile that a swap is about to remove, so it shouldn't
+        count against a cap.
+        """
+        return True
+
+    @classmethod
     def selection_weight_multiplier(cls) -> float:
         """
         Multiplier applied to the weight of every asset of this tile type when

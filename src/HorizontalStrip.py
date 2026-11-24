@@ -88,7 +88,21 @@ class HorizontalStrip:
     # Tile creation
     # ------------------------------------------------------------------
     @staticmethod
-    def _weighted_pick(candidates: List[MetaTile]) -> MetaTile:
+    def _weighted_pick(candidates: List[MetaTile], replacing: Optional[Tile] = None) -> Optional[MetaTile]:
+        """
+        Weighted random pick. Returns None if every candidate's tile type is
+        currently unavailable (e.g. the video cap is reached).
+        `replacing` is the tile a swap will remove, so it doesn't count toward caps.
+        """
+        # Hard limits first: drop types that can't be selected right now
+        allowed = {
+            t for t, cls in TILE_CLASSES.items()
+            if any(mt.type == t for mt in candidates) and cls.can_select(replacing)
+        }
+        candidates = [mt for mt in candidates if mt.type in allowed or mt.type not in TILE_CLASSES]
+        if not candidates:
+            return None
+
         # Each tile type can scale its assets' odds from live state
         # (e.g. TileVideo lowers video odds as more videos are loaded)
         multipliers = {
@@ -109,7 +123,12 @@ class HorizontalStrip:
     def _spawn_tile(self, x: float) -> Optional[Tile]:
         if not self._meta_tiles or self._height <= 0:
             return None
-        return self._create_tile(self._weighted_pick(self._meta_tiles), x)
+        meta_tile = self._weighted_pick(self._meta_tiles)
+        if meta_tile is None:
+            # Only capped types left (e.g. a video-only asset set at the video cap).
+            # The fill loop stops; it retries next frame once a tile is freed.
+            return None
+        return self._create_tile(meta_tile, x)
 
     def _create_tile(self, meta_tile: MetaTile, x: float) -> Optional[Tile]:
         if meta_tile.type == "image":
@@ -262,7 +281,10 @@ class HorizontalStrip:
             if not candidates:
                 continue
 
-            new_tile = self._create_tile(self._weighted_pick(candidates), tile.x)
+            new_meta = self._weighted_pick(candidates, replacing=tile)
+            if new_meta is None:
+                continue
+            new_tile = self._create_tile(new_meta, tile.x)
             if new_tile is not None:
                 self._pending_swaps[tile] = new_tile
 

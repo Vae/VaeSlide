@@ -1,21 +1,21 @@
 {
   "archive on middle click": true,
   "archive directory": "C:/Users/vae/Desktop/pix/del",
-  "global speed": 1.0,
+  "global speed": 0.75,
   "tile gap": 10,
   "wheel speed step": 0.25,
   "tile swap seconds": 10,
   "tile swap edge margin": 100,
   "asset loader threads": 2,
   "layers": [
-    { "speed": -2.25,  "overlap": 0.0 },
-    { "speed": -1.0,  "overlap": 0.0 },
-    { "speed": -2.5,  "overlap": 0.0 },
-    { "speed": -1.5,  "overlap": 0.0 },
-    { "speed": 2.0,  "overlap": 0.0 }
+    { "speed": -0.25,  "overlap": 0.0 },
+    { "speed": 0.25,  "overlap": 0.0 },
+    { "speed": -0.5,  "overlap": 0.0 },
+    { "speed": 0.5,  "overlap": 0.0 }
   ],
   "tile video": {
     "tile swap seconds": 90,
-    "weight per loaded video": 0.97
+    "weight per loaded video": 0.97,
+    "max loaded videos": 10
   }
 }

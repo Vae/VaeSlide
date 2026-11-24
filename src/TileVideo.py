@@ -47,7 +47,7 @@ class TileVideoAssetManager(AssetManager):
             # full_path = os.path.join(video_dir, video_file)
             full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
             width, height = get_video_dim(full_path, media_cache)
-            metaTile = MetaTile(weight=Weight(500.0), type="video", json_filename="", resource_filename=full_path,
+            metaTile = MetaTile(weight=Weight(5000.0), type="video", json_filename="", resource_filename=full_path,
                                 width=width,
                                 height=height)
             meta_tiles.append(metaTile)
@@ -64,6 +64,8 @@ class TileVideo(Tile):
     active_count = 0
     # "tile video" -> "weight per loaded video", read once on first use
     _weight_per_loaded_video: float | None = None
+    # "tile video" -> "max loaded videos", read once on first use
+    _max_loaded_videos: int | None = None
 
     def __init__(self, meta_tile: MetaTile, x: float, h: int, video_filename: str, ):
         super().__init__(meta_tile=meta_tile, x=x, h=h)
@@ -133,6 +135,24 @@ class TileVideo(Tile):
     def _on_error(self, error, error_string: str) -> None:
         logger.warning("Video error for %s: %s", self._videoFilePath, error_string)
         self.played_once = True  # don't keep a broken video on screen forever
+
+    @classmethod
+    def max_loaded_videos(cls) -> int:
+        """"tile video" -> "max loaded videos"; negative means no limit. Read once."""
+        if cls._max_loaded_videos is None:
+            TileVideo._max_loaded_videos = get_settings().section(SETTINGS_SECTION).get_number(
+                "max loaded videos", int)
+        return cls._max_loaded_videos
+
+    @classmethod
+    def can_select(cls, replacing: Tile | None = None) -> bool:
+        cap = cls.max_loaded_videos()
+        if cap < 0:
+            return True
+        count = TileVideo.active_count
+        if isinstance(replacing, TileVideo) and replacing._counted:
+            count -= 1  # a video -> video swap frees its own slot
+        return count < cap
 
     @classmethod
     def selection_weight_multiplier(cls) -> float:

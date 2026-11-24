@@ -82,6 +82,9 @@ class Settings(SettingsSection):
             # Video odds are multiplied by this once per video tile currently loaded.
             # 1.0 = no effect; 0.5 = each loaded video halves the odds; 0 = one video at a time
             "weight per loaded video": 1.0,
+            # Hard cap on video tiles loaded at once, across all layers
+            # (includes off-screen buffer tiles and pending swaps). -1 = no limit; 0 = no videos
+            "max loaded videos": -1,
         },
     }
 
