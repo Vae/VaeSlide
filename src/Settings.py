@@ -79,6 +79,9 @@ class Settings(SettingsSection):
         # Settings for video tiles (TileVideo)
         "tile video": {
             "tile swap seconds": 10.0,  # like the top-level one, but for video tiles
+            # Video odds are multiplied by this once per video tile currently loaded.
+            # 1.0 = no effect; 0.5 = each loaded video halves the odds; 0 = one video at a time
+            "weight per loaded video": 1.0,
         },
     }
 

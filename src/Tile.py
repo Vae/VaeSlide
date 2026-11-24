@@ -40,6 +40,15 @@ class Tile:
         """True once the tile has content to draw (assets load asynchronously)."""
         return True
 
+    @classmethod
+    def selection_weight_multiplier(cls) -> float:
+        """
+        Multiplier applied to the weight of every asset of this tile type when
+        picking the next asset. Lets a type adjust its odds from live state,
+        e.g. how many tiles of that type are currently loaded.
+        """
+        return 1.0
+
     def swap_seconds(self, default: float) -> float:
         """
         On-screen seconds before this tile is swapped; <= 0 means never.

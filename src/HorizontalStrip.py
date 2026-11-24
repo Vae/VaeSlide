@@ -14,6 +14,12 @@ from src.TileVideo import TileVideo
 
 logger = logging.getLogger(__name__)
 
+# MetaTile.type -> Tile subclass
+TILE_CLASSES = {
+    "image": TileImage,
+    "video": TileVideo,
+}
+
 
 def _aspect_key(meta_tile: MetaTile) -> Optional[Tuple[int, int]]:
     """Exact aspect ratio as a reduced (w, h) fraction, e.g. 1920x1080 -> (16, 9)."""
@@ -83,12 +89,19 @@ class HorizontalStrip:
     # ------------------------------------------------------------------
     @staticmethod
     def _weighted_pick(candidates: List[MetaTile]) -> MetaTile:
-        weights = [mt.weight.value for mt in candidates]
+        # Each tile type can scale its assets' odds from live state
+        # (e.g. TileVideo lowers video odds as more videos are loaded)
+        multipliers = {
+            t: cls.selection_weight_multiplier()
+            for t, cls in TILE_CLASSES.items()
+            if any(mt.type == t for mt in candidates)
+        }
+        weights = [mt.weight.value * multipliers.get(mt.type, 1.0) for mt in candidates]
         if sum(weights) > 0:
             mt = random.choices(candidates, weights=weights, k=1)[0]
         else:
-            # All weights are 0: failed loads, or float underflow after a long
-            # run of halving. random.choices would raise, so pick uniformly.
+            # All weights are 0: failed loads, float underflow after a long run
+            # of halving, or a 0 multiplier. random.choices would raise, so pick uniformly.
             mt = random.choice(candidates)
         mt.weight.value /= 2
         return mt

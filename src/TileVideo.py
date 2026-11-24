@@ -59,8 +59,16 @@ class TileVideoAssetManager(AssetManager):
 class TileVideo(Tile):
     """Holds the pixmap for a tile and provides a generic draw method."""
 
+    # Number of TileVideo instances that exist and haven't been removed, across
+    # all strips (each one owns a QMediaPlayer, so this tracks decoding load)
+    active_count = 0
+    # "tile video" -> "weight per loaded video", read once on first use
+    _weight_per_loaded_video: float | None = None
+
     def __init__(self, meta_tile: MetaTile, x: float, h: int, video_filename: str, ):
         super().__init__(meta_tile=meta_tile, x=x, h=h)
+        TileVideo.active_count += 1
+        self._counted = True
 
         self._videoFilePath = video_filename
         self._swap_seconds = get_settings().section(SETTINGS_SECTION).get_number("tile swap seconds")
@@ -126,6 +134,22 @@ class TileVideo(Tile):
         logger.warning("Video error for %s: %s", self._videoFilePath, error_string)
         self.played_once = True  # don't keep a broken video on screen forever
 
+    @classmethod
+    def selection_weight_multiplier(cls) -> float:
+        """
+        weight_per_loaded_video ** active_count: each video already loaded
+        multiplies the chance of picking another video by the setting.
+        1.0 leaves weights unchanged; 0.5 halves the odds per loaded video.
+        """
+        if cls._weight_per_loaded_video is None:
+            factor = get_settings().section(SETTINGS_SECTION).get_number("weight per loaded video")
+            if factor < 0:
+                logger.error("\"%s.weight per loaded video\" must be >= 0, got %r. Using 0.",
+                             SETTINGS_SECTION, factor)
+                factor = 0.0
+            TileVideo._weight_per_loaded_video = factor
+        return cls._weight_per_loaded_video ** TileVideo.active_count
+
     def swap_seconds(self, default: float) -> float:
         return self._swap_seconds  # from settings.json "tile video" section
 
@@ -141,5 +165,8 @@ class TileVideo(Tile):
         painter.drawImage(int(self.x), 0, self.scaled_img)
 
     def removed(self):
+        if self._counted:
+            self._counted = False
+            TileVideo.active_count -= 1
         self.player.stop()
         self.scaled_img = None

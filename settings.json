@@ -8,13 +8,14 @@
   "tile swap edge margin": 100,
   "asset loader threads": 2,
   "layers": [
+    { "speed": -2.25,  "overlap": 0.0 },
+    { "speed": -1.0,  "overlap": 0.0 },
     { "speed": -2.5,  "overlap": 0.0 },
-    { "speed": -2.5,  "overlap": 0.0 },
-    { "speed": -2.5,  "overlap": 0.0 },
-    { "speed": -2.5,  "overlap": 0.0 },
+    { "speed": -1.5,  "overlap": 0.0 },
     { "speed": 2.0,  "overlap": 0.0 }
   ],
   "tile video": {
-    "tile swap seconds": 90
+    "tile swap seconds": 90,
+    "weight per loaded video": 2.0
   }
 }
