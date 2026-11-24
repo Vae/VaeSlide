@@ -4,3 +4,5 @@ dist
 .idea
 .git
 .media_cache.json
+assets
+*.log
