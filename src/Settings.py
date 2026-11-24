@@ -19,6 +19,13 @@ class Settings:
     DEFAULTS: dict[str, Any] = {
         "archive on middle click": True,
         "archive directory": None,  # must be set in settings.json for archiving to work
+        # Parallax layers, back to front. speed is in px/frame; overlap is a
+        # fraction of screen height covered over the previous layer.
+        "layers": [
+            {"speed": 0.5, "overlap": 0.0},
+            {"speed": 1.25, "overlap": 0.0},
+            {"speed": 2.0, "overlap": 0.0},
+        ],
     }
 
     def __init__(self, path: str = DEFAULT_SETTINGS_PATH):

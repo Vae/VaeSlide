@@ -1,4 +1,9 @@
 {
   "archive on middle click": true,
-  "archive directory": "C:/Users/vae/Desktop/pix/del"
+  "archive directory": "C:/Users/vae/Desktop/pix/del",
+  "layers": [
+    { "speed": -6.5,  "overlap": 0.0 },
+    { "speed": 1.25, "overlap": 0.0 },
+    { "speed": 5.0,  "overlap": 0.0 }
+  ]
 }

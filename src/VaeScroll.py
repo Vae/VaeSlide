@@ -9,7 +9,7 @@ containing a "weight" field that controls how frequently it appears.
 Usage:
     python screensaver.py             # fullscreen across all monitors
     python screensaver.py --window    # windowed mode for testing
-    python screensaver.py --speed 2.0 # custom scroll speed (px/frame)
+    python screensaver.py --speed 2.0 # multiply every layer's speed (set in settings.json)
 """
 
 import json
@@ -26,10 +26,10 @@ from PySide6.QtCore import QTimer, Qt
 from src.ResourceLoader import ResourceLoader
 from src.Tile import Weight, MetaTile
 from src.MediaCache import MediaCache
-from src.ScrollLayer import ScrollLayer, LayerConfig
+from src.ScrollLayer import ScrollLayer, LayerConfig, parse_layer_configs
 from src.TileImage import TileImageAssetManager
 from src.TileVideo import TileVideoAssetManager
-from src.Settings import get_settings
+from src.Settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -59,25 +59,13 @@ QtCore.qInstallMessageHandler(_qt_handler)
 os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=true")
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
-def generate_layer_configs(layer_count: int, overlap_multiplier: float) -> List[LayerConfig]:
-    """
-    Generates a list of LayerConfig objects.
-
-    The speed_factor is linearly interpolated from 0.25 to 1.0.
-    The overlap is linearly interpolated from 0.0 to overlap_multiplier.
-    """
-    if layer_count <= 0:
-        return []
-    if layer_count == 1:
-        return [LayerConfig(speed_factor=1.0, overlap=0.0)]
-
-    return [
-        LayerConfig(
-            speed_factor=0.25 + (1.0 - 0.25) * (i / (layer_count - 1)),
-            overlap=overlap_multiplier * (i / (layer_count - 1))
-        )
-        for i in range(layer_count)
-    ]
+def load_layer_configs() -> List[LayerConfig]:
+    """Layer configs from settings.json, falling back to the built-in defaults."""
+    configs = parse_layer_configs(get_settings().get("layers"))
+    if not configs:
+        logger.error("No valid layers in settings.json; using default layers.")
+        configs = parse_layer_configs(Settings.DEFAULTS["layers"])
+    return configs
 
 
 class EndlessScrollWidget(QWidget):
@@ -91,18 +79,11 @@ class EndlessScrollWidget(QWidget):
 
     GAP_PX = -1  # gap between tiles (0 = seamless)
 
-    # Back to front. overlap = fraction of screen height covered by the previous layer.
-    DEFAULT_LAYERS = [
-        LayerConfig(speed_factor=0.25, overlap=0.0),
-        LayerConfig(speed_factor=0.6,  overlap=0.20),
-        LayerConfig(speed_factor=1.0,  overlap=0.30),
-    ]
-
-    def __init__(self, fullscreen: bool, speed: float, layers: Optional[List[LayerConfig]] = None):
+    def __init__(self, fullscreen: bool, speed_scale: float = 1.0, layers: Optional[List[LayerConfig]] = None):
         super().__init__()
 
         self._fullscreen = fullscreen
-        self._speed = speed
+        self._speed_scale = speed_scale
         self._settings = get_settings()
         self._resourceLoader = ResourceLoader()
         self._mediaCache = MediaCache(os.path.join(os.path.dirname(__file__), "..", ".media_cache.json"))
@@ -112,7 +93,7 @@ class EndlessScrollWidget(QWidget):
 
         self._layers: List[ScrollLayer] = [
             ScrollLayer(cfg, self._resourceLoader, self.GAP_PX)
-            for cfg in (layers or generate_layer_configs(3, 0.0))
+            for cfg in (layers or load_layer_configs())
         ]
 
         # Background color visible in gaps (if any)
@@ -187,7 +168,7 @@ class EndlessScrollWidget(QWidget):
     # ------------------------------------------------------------------
     def _tick(self) -> None:
         for layer in self._layers:
-            layer.tick(self._speed)
+            layer.tick(self._speed_scale)
         self.update()  # trigger repaint
 
     # ------------------------------------------------------------------
@@ -279,13 +260,11 @@ class VaeScroll:
 # Entry point
 # ======================================================================
 def main() -> None:
-    default_speed = 2.0
-
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
                         help="Run in a window instead of fullscreen (for testing)")
-    parser.add_argument("--speed", type=float, default=default_speed,
-                        help=f"Scroll speed in pixels per frame (default: {default_speed})")
+    parser.add_argument("--speed", type=float, default=1.0,
+                        help="Multiplier applied to every layer's speed from settings.json (default: 1.0)")
     args = parser.parse_args()
 
     fullscreen = not args.window
@@ -301,7 +280,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
 
-    widget = EndlessScrollWidget(fullscreen=fullscreen, speed=args.speed)
+    widget = EndlessScrollWidget(fullscreen=fullscreen, speed_scale=args.speed)
 
     # Load paths from settings.json
     assets_path = os.path.join(os.path.dirname("."), "assets.json")
