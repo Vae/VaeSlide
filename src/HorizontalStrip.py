@@ -29,6 +29,8 @@ class HorizontalStrip:
         self._tiles: List[Tile] = []
         self._width = 0
         self._height = 0
+        # Sign of the last scroll: >0 tiles move left, <0 tiles move right
+        self._direction = 1.0
 
     # ------------------------------------------------------------------
     # Setup
@@ -72,24 +74,50 @@ class HorizontalStrip:
     # Layout
     # ------------------------------------------------------------------
     def cull_and_fill(self) -> None:
-        """Drop tiles that left the screen and top up the right side."""
+        """
+        Drop tiles that are entirely off screen and fill both edges.
+
+        Tiles enter from the leading edge: the right edge when scrolling left
+        (positive speed), the left edge when scrolling right (negative speed).
+        A buffer of one strip-height is pre-filled past the leading edge so new
+        tiles are ready before they come into view; the trailing edge gets no
+        buffer, so tiles are dropped as soon as they leave the screen.
+
+        self._tiles is kept sorted by x.
+        """
         if self._width <= 0 or self._height <= 0:
             return
 
-        for lost_tile in [t for t in self._tiles if t.right <= 0]:
-            lost_tile.removed()
-            self._tiles.remove(lost_tile)
-
-        #self._tiles = [t for t in self._tiles if t.right > 0]
-
         buffer = self._height
-        rightmost = max((t.right for t in self._tiles), default=0.0)
-        while rightmost < self._width + buffer:
-            tile = self._spawn_tile(rightmost)
+        scrolling_right = self._direction < 0
+        left_limit = -buffer if scrolling_right else 0.0
+        right_limit = self._width + (0.0 if scrolling_right else buffer)
+
+        # Cull tiles fully outside [left_limit, right_limit]
+        kept = []
+        for tile in self._tiles:
+            if tile.right <= left_limit or tile.x >= right_limit:
+                tile.removed()
+            else:
+                kept.append(tile)
+        self._tiles = kept
+
+        # Fill the right side
+        next_x = self._tiles[-1].right + self._gap_px if self._tiles else 0.0
+        while next_x < right_limit:
+            tile = self._spawn_tile(next_x)
             if tile is None:
                 break
             self._tiles.append(tile)
-            rightmost += max(1, tile.width + self._gap_px)
+            next_x += max(1, tile.width + self._gap_px)
+
+        # Fill the left side
+        while self._tiles and self._tiles[0].x > left_limit:
+            tile = self._spawn_tile(0.0)
+            if tile is None:
+                break
+            tile.x = self._tiles[0].x - self._gap_px - max(1, tile.width)
+            self._tiles.insert(0, tile)
 
     def resize(self, width: int, height: int) -> None:
         """Re-scale and re-flow all tiles for a new viewport size."""
@@ -114,6 +142,9 @@ class HorizontalStrip:
     # Animation / painting
     # ------------------------------------------------------------------
     def scroll(self, dx: float) -> None:
+        """Move every tile left by dx pixels (a negative dx moves them right)."""
+        if dx != 0:
+            self._direction = dx
         for tile in self._tiles:
             tile.x -= dx
         self.cull_and_fill()
