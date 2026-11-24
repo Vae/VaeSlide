@@ -36,14 +36,18 @@ class HorizontalStrip:
     layouts can run side by side without affecting each other.
     """
 
-    def __init__(self, resource_loader: ResourceLoader, gap_px: int = -1, swap_seconds: float = 0.0):
+    def __init__(self, resource_loader: ResourceLoader, gap_px: int = -1, swap_seconds: float = 0.0,
+                 swap_edge_margin: float = 0.0):
         """
-        swap_seconds: a tile that has been on screen this long is swapped for
-                      another asset with the same aspect ratio. <= 0 disables.
+        swap_seconds:     a tile that has been on screen this long is swapped for
+                          another asset with the same aspect ratio. <= 0 disables.
+        swap_edge_margin: tiles must be fully on screen and at least this many px
+                          from both screen edges to be swapped.
         """
         self._resource_loader = resource_loader
         self._gap_px = gap_px
         self._swap_seconds = swap_seconds
+        self._swap_edge_margin = swap_edge_margin
         self._meta_tiles: List[MetaTile] = []
         # Meta tiles grouped by reduced aspect ratio (w, h), used for swapping
         self._by_aspect: Dict[Tuple[int, int], List[MetaTile]] = {}
@@ -201,6 +205,11 @@ class HorizontalStrip:
                 tile.visible_since = now
                 continue
             if now - tile.visible_since < self._swap_seconds:
+                continue
+            # Don't swap tiles that are near or past an edge. The clock keeps
+            # running, so an entering tile swaps once it is far enough in.
+            margin = self._swap_edge_margin
+            if tile.x < margin or tile.right > self._width - margin:
                 continue
 
             # Restart the clock either way, so a tile with no match isn't re-checked every frame
