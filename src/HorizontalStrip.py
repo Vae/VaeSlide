@@ -11,6 +11,7 @@ from src.AssetLoader import AssetLoader
 from src.Tile import MetaTile, Tile, Weight
 from src.TileImage import TileImage
 from src.TileVideo import TileVideo
+from src.TileMaze import TileMaze
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 TILE_CLASSES = {
     "image": TileImage,
     "video": TileVideo,
+    "maze": TileMaze,
 }
 
 
@@ -137,6 +139,8 @@ class HorizontalStrip:
         if meta_tile.type == "video":
             return TileVideo(video_filename=meta_tile.resource_filename, x=x,
                              h=self._height, meta_tile=meta_tile)
+        if meta_tile.type == "maze":
+            return TileMaze(meta_tile=meta_tile, x=x, h=self._height)
         return None
 
     # ------------------------------------------------------------------
@@ -229,6 +233,9 @@ class HorizontalStrip:
         for tile in self._tiles:
             tile.x -= dx
         self.cull_and_fill()
+        now = time.monotonic()
+        for tile in self._tiles:
+            tile.tick(now, tile.right > 0 and tile.x < self._width)
         self._swap_stale_tiles()
 
     # ------------------------------------------------------------------

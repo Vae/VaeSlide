@@ -36,6 +36,17 @@ class Tile:
         # Set when the tile's asset could not be loaded; it will never become ready
         self.load_failed = False
 
+    def describe(self) -> str:
+        """One-line description, logged when the tile is left-clicked."""
+        return self.meta_tile.resource_filename
+
+    def tick(self, now: float, visible: bool) -> None:
+        """
+        Called once per frame by the strip. `now` is time.monotonic(), and
+        `visible` is True when any part of the tile is on screen. Animated tiles override it.
+        """
+        pass
+
     def is_ready(self) -> bool:
         """True once the tile has content to draw (assets load asynchronously)."""
         return True

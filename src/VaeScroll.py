@@ -30,6 +30,7 @@ from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig, parse_layer_configs
 from src.TileImage import TileImageAssetManager
 from src.TileVideo import TileVideoAssetManager
+from src.TileMaze import TileMazeAssetManager
 from src.Settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -212,12 +213,15 @@ class EndlessScrollWidget(QWidget):
         for layer in reversed(self._layers):
             tile = layer.hit_test(event.position().x(), event.position().y())
             if tile and event.button() == Qt.LeftButton:
-                print(f"Clicked tile: {tile.meta_tile.resource_filename}")
+                logger.info("Clicked tile: %s", tile.describe())
                 return
             if (tile and event.button() == Qt.MiddleButton
-                    and self._settings.get("archive on middle click")
-                    and Path(tile.meta_tile.resource_filename).is_file()):
-                self._archive(tile.meta_tile.resource_filename)
+                    and self._settings.get("archive on middle click")):
+                if Path(tile.meta_tile.resource_filename).is_file():
+                    self._archive(tile.meta_tile.resource_filename)
+                else:
+                    # e.g. procedural maze tiles have no file; don't fall through to quitting
+                    logger.info("Tile %s has no file to archive.", tile.meta_tile.resource_filename)
                 return
 
         self._shutdown()
@@ -272,6 +276,10 @@ class EndlessScrollWidget(QWidget):
     def load_videos(self, path: str):
         self._add_meta_tiles(self._TileVideoAssetManager.load_assets(self._mediaCache, path))
 
+    def load_mazes(self):
+        """Add the procedural maze entries configured under "tile maze"."""
+        self._add_meta_tiles(TileMazeAssetManager().load_assets(self._mediaCache))
+
 class VaeScroll:
     def __init__(self):
         self.media_cache = MediaCache()
@@ -321,6 +329,8 @@ def main() -> None:
     for vid_path in assets_settings.get("video_paths", []):
         if Path(vid_path).is_dir and not vid_path.startswith("#"):
             widget.load_videos(vid_path.replace('\\', '/'))
+
+    widget.load_mazes()
 
     widget.build_layers()
     widget.show()

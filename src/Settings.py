@@ -86,6 +86,20 @@ class Settings(SettingsSection):
             # (includes off-screen buffer tiles and pending swaps). -1 = no limit; 0 = no videos
             "max loaded videos": -1,
         },
+        # Settings for procedural maze tiles (TileMaze)
+        "tile maze": {
+            "count": 2,          # maze entries in the selection pool; 0 = no mazes
+            "weight": 1.0,       # selection weight of each entry (like an image's weight)
+            "maze size": [32, 18],  # [cols, rows] in cells, 2..500 each
+            # "random" or one of: recursive backtracker, prim, kruskal, aldous-broder,
+            # wilson, hunt and kill, binary tree, sidewinder
+            "algorithm": "random",
+            "speed": 120,        # generation/solving steps per second
+            "wall size": 0.35,   # wall thickness as a fraction of one cell (0.05..0.9)
+            "solve": True,       # animate the solution path after generating
+            "hold seconds": 5,   # minimum time a finished maze is shown before it may be swapped
+            "flash seconds": 3,  # after solving, flash the solution this long; no swap until it ends
+        },
     }
 
     def __init__(self, path: str = DEFAULT_SETTINGS_PATH):

@@ -17,5 +17,16 @@
     "tile swap seconds": 90,
     "weight per loaded video": 0.97,
     "max loaded videos": 10
+  },
+  "tile maze": {
+    "count": 200,
+    "weight": 100000.0,
+    "maze size": [32, 18],
+    "algorithm": "random",
+    "speed": 120,
+    "wall size": 0.35,
+    "solve": true,
+    "hold seconds": 5,
+    "flash seconds": 3
   }
 }
