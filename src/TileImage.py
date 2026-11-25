@@ -11,7 +11,7 @@ from PIL import Image
 
 from src.AssetScanner import AssetScanner
 from src.MediaCache import MediaCache
-from src.Tile import MetaTile, Tile, TileContext, Weight
+from src.Tile import MetaTile, Tile, TileContext
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".xpm"}
 logger = logging.getLogger(__name__)
@@ -86,18 +86,18 @@ class TileImageScanner(AssetScanner):
             image_path = os.path.join(path, image_name).replace('\\', '/')
             json_path = os.path.join(path, base + ".json").replace('\\', '/')
 
-            weight = Weight(10000.0)
+            weight = 10000.0
             width = height = None
             if os.path.isfile(json_path):
                 try:
                     with open(json_path, "r", encoding="utf-8") as fh:
                         meta = json.load(fh)
-                    weight = Weight(meta.get("weight", 1))
+                    weight = float(meta.get("weight", 1))
                     width = _positive_int(meta.get("width"))
                     height = _positive_int(meta.get("height"))
-                except (json.JSONDecodeError, ValueError, OSError, AttributeError) as exc:
+                except (json.JSONDecodeError, ValueError, TypeError, OSError, AttributeError) as exc:
                     logger.warning("Bad JSON for %s.json: %s; defaulting weight to 1", base, exc)
-                    weight = Weight(1)
+                    weight = 1.0
             if width is None or height is None:
                 # No sidecar, or the sidecar has no usable width/height
                 try:

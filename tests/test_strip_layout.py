@@ -129,7 +129,7 @@ def test_failed_load_zeroes_the_assets_weight(tile_type):
     victim = strip.tiles[0]
     victim.load_failed = True
     strip.scroll(1.0)
-    assert victim.meta_tile.weight.value == 0.0
+    assert strip.picker.weight(victim.meta_tile) == 0.0
 
 
 def test_hit_test(tile_type):
@@ -143,7 +143,12 @@ def test_hit_test(tile_type):
 
 def test_layers_get_independent_weights(tile_type):
     tile_type("fake")
-    shared = [meta("a", weight=4.0)]
-    strip = make_strip(shared)
-    assert shared[0].weight.value == 4.0  # the strip halved its own copy, not the master list
-    assert strip.tiles[0].meta_tile is not shared[0]
+    shared = [meta("a", weight=4.0), meta("b", weight=4.0)]
+    first = make_strip(shared)
+    second = make_strip(shared)
+    # Each strip halves weights in its own picker; the shared MetaTiles are untouched
+    assert all(mt.weight == 4.0 for mt in shared)
+    assert first.picker is not second.picker
+    picks = sum(1 for t in first.tiles if t.meta_tile is shared[0])
+    assert first.picker.weight(shared[0]) == 4.0 / 2 ** picks
+    assert first.tiles[0].meta_tile in shared  # tiles point at the shared assets

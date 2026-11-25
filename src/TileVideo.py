@@ -14,7 +14,7 @@ from moviepy import VideoFileClip
 from src.AssetScanner import AssetScanner
 from src.MediaCache import MediaCache
 from src.Settings import get_settings, section_config
-from src.Tile import Tile, TileContext, MetaTile, Weight
+from src.Tile import Tile, TileContext, MetaTile
 
 # .gif is played through QMediaPlayer like the others
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mkv", ".mov", ".avi", ".gif"}
@@ -80,7 +80,7 @@ class TileVideoScanner(AssetScanner):
             except Exception as exc:  # moviepy raises a variety of errors for unreadable files
                 logger.warning("Skipping %s: could not read its size (%s)", full_path, exc)
                 continue
-            meta_tiles.append(MetaTile(weight=Weight(10000.0), type=TileVideo.TYPE, json_filename="",
+            meta_tiles.append(MetaTile(weight=10000.0, type=TileVideo.TYPE, json_filename="",
                                        resource_filename=full_path, width=width, height=height))
 
         logger.info("Loaded %d video files from %s", len(meta_tiles), path)

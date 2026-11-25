@@ -1,12 +1,12 @@
 """Plain helpers shared by the tests (fixtures live in conftest.py)."""
 
 from src.HorizontalStrip import HorizontalStrip, StripConfig
-from src.Tile import MetaTile, TileContext, Weight
+from src.Tile import MetaTile, TileContext
 
 
 def meta(name: str, width: int = 100, height: int = 100, type: str = "fake", weight: float = 1.0) -> MetaTile:
     """A MetaTile for tests."""
-    return MetaTile(weight=Weight(weight), type=type, width=width, height=height,
+    return MetaTile(weight=weight, type=type, width=width, height=height,
                     resource_filename=name, json_filename="")
 
 

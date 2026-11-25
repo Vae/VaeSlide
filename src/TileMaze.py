@@ -16,7 +16,7 @@ from src.AssetScanner import AssetScanner
 from src.MazeGenerators import ALGORITHMS, Cell
 from src.MediaCache import MediaCache
 from src.Settings import get_settings, section_config
-from src.Tile import MetaTile, Tile, TileContext, Weight
+from src.Tile import MetaTile, Tile, TileContext
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class TileMazeScanner(AssetScanner):
         width = round((cfg.cols + f) * 1000)
         height = round((cfg.rows + f) * 1000)
         meta_tiles = [
-            MetaTile(weight=Weight(cfg.weight), type=TileMaze.TYPE, width=width, height=height,
+            MetaTile(weight=cfg.weight, type=TileMaze.TYPE, width=width, height=height,
                      resource_filename=f"maze:{i}", json_filename="")
             for i in range(cfg.count)
         ]

@@ -81,7 +81,7 @@ def test_scanner_entries(use_settings):
     use_settings({"tile maze": {"count": 3, "weight": 7.0, "maze size": [10, 5], "wall size": 0.5}})
     metas = TileMazeScanner().scan(None)
     assert [m.resource_filename for m in metas] == ["maze:0", "maze:1", "maze:2"]
-    assert all(m.type == "maze" and m.weight.value == 7.0 for m in metas)
+    assert all(m.type == "maze" and m.weight == 7.0 for m in metas)
     # Aspect ratio of the drawn maze: (cols + wall) : (rows + wall)
     assert metas[0].width / metas[0].height == pytest.approx(10.5 / 5.5)
     assert not TileMazeScanner.NEEDS_PATH

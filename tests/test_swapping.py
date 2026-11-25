@@ -6,6 +6,7 @@ import types
 import pytest
 
 import src.HorizontalStrip as strip_module
+from src.TileSwapper import TileSwapper
 from helpers import make_strip, meta
 
 WIDTH, HEIGHT = 1000, 100   # 100x100 tiles: ten fit on screen, at x = 0, 100, ... 900
@@ -75,12 +76,12 @@ def test_delays_are_random_fractions_within_range(tile_type):
     tile = Fake(meta("a"), 0, HEIGHT, None)
     delays = []
     for _ in range(500):
-        strip_module.HorizontalStrip._start_swap_clock(tile, 0.0, 1.25, 1.75)
+        TileSwapper.start_clock(tile, 0.0, 1.25, 1.75)
         delays.append(tile.swap_after)
     assert min(delays) >= 1.25 and max(delays) <= 1.75
     assert len(set(delays)) > 400
     assert any(d != round(d, 1) for d in delays)  # not whole numbers or tenths
-    strip_module.HorizontalStrip._start_swap_clock(tile, 0.0, -5.0, 0.5)
+    TileSwapper.start_clock(tile, 0.0, -5.0, 0.5)
     assert 0.0 <= tile.swap_after <= 0.5  # a negative minimum is clamped to 0
 
 
@@ -130,7 +131,7 @@ def test_swap_waits_for_the_replacement_to_be_ready(tile_type, clock):
     old = by_x(strip)[400]
     Fake.start_ready = False  # replacements load "in the background"
     frame(strip, clock, 1.5)
-    replacement = strip._pending_swaps[old]
+    replacement = strip.swapper.pending[old]
     frame(strip, clock)
     assert by_x(strip)[400] is old  # still showing the old tile
     replacement.ready = True
@@ -145,13 +146,13 @@ def test_failed_replacement_is_dropped(tile_type, clock):
     old = by_x(strip)[400]
     Fake.start_ready = False
     frame(strip, clock, 1.5)
-    replacement = strip._pending_swaps[old]
+    replacement = strip.swapper.pending[old]
     replacement.load_failed = True
     frame(strip, clock)
-    assert old not in strip._pending_swaps
+    assert old not in strip.swapper.pending
     assert by_x(strip)[400] is old
     assert replacement.removed_called
-    assert replacement.meta_tile.weight.value == 0.0
+    assert strip.picker.weight(replacement.meta_tile) == 0.0
 
 
 def test_only_same_aspect_ratio_assets_are_used(tile_type, clock):
@@ -200,8 +201,8 @@ def test_resize_drops_pending_swaps(tile_type, clock):
     frame(strip, clock, 0.0)
     Fake.start_ready = False
     frame(strip, clock, 1.5)
-    pending = list(strip._pending_swaps.values())
+    pending = list(strip.swapper.pending.values())
     assert pending
     strip.resize(WIDTH, 150)
-    assert strip._pending_swaps == {}
+    assert strip.swapper.pending == {}
     assert all(t.removed_called for t in pending)

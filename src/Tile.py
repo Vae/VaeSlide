@@ -7,15 +7,13 @@ if TYPE_CHECKING:
     from src.AssetLoader import AssetLoader
 
 
-@dataclass
-class Weight:
-    """A weight value for an image."""
-    value: float = 1.0
-
-@dataclass
+@dataclass(eq=False)  # compared and hashed by identity, so it can key per-strip weight tables
 class MetaTile:
-    """A loaded image with its display weight."""
-    weight: Weight
+    """
+    One asset in the selection pool. Shared by every strip and never modified;
+    each strip's AssetPicker tracks its own current weight.
+    """
+    weight: float  # starting selection weight
     type: str
 
     width: int

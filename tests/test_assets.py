@@ -90,7 +90,7 @@ def test_image_scan_reads_sizes_and_filters_extensions(tmp_path, media_cache):
     assert sorted(found) == ["a.png", "b.JPG", "c.bmp"]
     assert (found["a.png"].width, found["a.png"].height) == (300, 200)
     assert found["a.png"].type == "image"
-    assert found["a.png"].weight.value == 10000.0  # default weight without a sidecar
+    assert found["a.png"].weight == 10000.0  # default weight without a sidecar
     # Sizes are cached for the next startup
     assert media_cache.get_dimensions(found["b.JPG"].resource_filename) == (64, 48)
 
@@ -98,7 +98,7 @@ def test_image_scan_reads_sizes_and_filters_extensions(tmp_path, media_cache):
 def test_sidecar_weight_and_dimensions(tmp_path, media_cache):
     make_image(tmp_path, "a.png", (300, 200), sidecar={"weight": 5, "width": 1920, "height": 1080})
     a = scan_images(tmp_path, media_cache)["a.png"]
-    assert a.weight.value == 5
+    assert a.weight == 5
     assert (a.width, a.height) == (1920, 1080)  # the sidecar wins over the file
 
 
@@ -106,14 +106,14 @@ def test_sidecar_weight_and_dimensions(tmp_path, media_cache):
 def test_sidecar_without_usable_dimensions_falls_back_to_the_file(tmp_path, media_cache, sidecar):
     make_image(tmp_path, "a.png", (300, 200), sidecar=sidecar)
     a = scan_images(tmp_path, media_cache)["a.png"]
-    assert a.weight.value == 5
+    assert a.weight == 5
     assert (a.width, a.height) == (300, 200)
 
 
 def test_bad_sidecar_json_defaults_weight_to_1(tmp_path, media_cache):
     make_image(tmp_path, "a.png", (300, 200), sidecar="{broken")
     a = scan_images(tmp_path, media_cache)["a.png"]
-    assert a.weight.value == 1
+    assert a.weight == 1
     assert (a.width, a.height) == (300, 200)
 
 
