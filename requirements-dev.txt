@@ -1,0 +1,2 @@
+# Test dependencies (the app itself needs PySide6, numpy, Pillow and moviepy)
+pytest>=8
