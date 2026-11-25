@@ -32,6 +32,8 @@
   "tile transition": {
     "type": "random",
     "seconds": 1.0,
-    "star points": 9
+    "star points": 9,
+    "mask shape": "random",
+    "mask softness": 0.15
   }
 }

@@ -15,10 +15,11 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import ClassVar, Dict, Optional, Type
+from typing import Callable, ClassVar, Dict, Optional, Tuple, Type
 
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QPainter, QPainterPath, QPolygonF
+import numpy as np
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPolygonF, QTransform
 
 from src.Settings import get_settings, section_config
 from src.Tile import Tile
@@ -110,13 +111,243 @@ class StarSwipeTransition(Transition):
         clip.addRect(rect)
         clip = clip.intersected(self.star_path(rect, progress))
         painter.save()
-        painter.setClipPath(clip)
+        painter.setClipPath(clip, Qt.ClipOperation.IntersectClip)
         new.draw(painter)
         painter.restore()
 
 
+def _draw_scaled(painter: QPainter, tile: Tile, center: QPointF, scale: float, opacity: float = 1.0) -> None:
+    """Draw a tile scaled about `center`, at `opacity` (on top of the painter's own)."""
+    painter.save()
+    painter.translate(center)
+    painter.scale(scale, scale)
+    painter.translate(-center)
+    painter.setOpacity(painter.opacity() * opacity)
+    tile.draw(painter)
+    painter.restore()
+
+
+class ZoomTransition(Transition):
+    """
+    Dolly through: the old tile zooms in towards the viewer while the new
+    tile pulls back from a close-up into place, fading in on top.
+    """
+    NAME = "zoom"
+    OLD_ZOOM = 0.6   # the old tile grows to 1 + OLD_ZOOM times its size
+    NEW_ZOOM = 0.4   # the new tile starts at 1 + NEW_ZOOM times its size
+
+    def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+        e = ease_in_out(progress)
+        rect = tile_rect(new)
+        painter.save()
+        painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)  # zoomed tiles must not cover neighbours
+        _draw_scaled(painter, old, rect.center(), 1.0 + self.OLD_ZOOM * e)
+        _draw_scaled(painter, new, rect.center(), 1.0 + self.NEW_ZOOM * (1.0 - e), opacity=e)
+        painter.restore()
+
+
+class SpinTransition(Transition):
+    """
+    The tile turns over like a card, around its vertical or horizontal axis
+    (chosen at random), with the new asset on the back. The card darkens as
+    it turns edge-on.
+    """
+    NAME = "spin"
+    MAX_SHADE = 0.6  # darkness when edge-on
+
+    def __init__(self, rng: Optional[random.Random] = None):
+        rng = rng or random
+        self.axis = rng.choice((Qt.Axis.YAxis, Qt.Axis.XAxis))
+        self.direction = rng.choice((-1.0, 1.0))
+
+    def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+        angle = 180.0 * ease_in_out(progress)  # 0..180 degrees
+        # First half: the old face turns away. Second half: the new face turns in.
+        tile, face_angle = (old, angle) if angle < 90.0 else (new, angle - 180.0)
+        rect = tile_rect(new)
+        center = rect.center()
+        turn = QTransform()
+        turn.translate(center.x(), center.y())
+        turn.rotate(self.direction * face_angle, self.axis)
+        turn.translate(-center.x(), -center.y())
+
+        painter.save()
+        painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)  # perspective may bulge past the rect
+        painter.setTransform(turn, combine=True)
+        tile.draw(painter)
+        shade = self.MAX_SHADE * abs(math.sin(math.radians(face_angle)))
+        if shade > 0.0:
+            painter.fillRect(rect, QColor(0, 0, 0, round(255 * shade)))
+        painter.restore()
+
+
+# ----------------------------------------------------------------------
+# Masks for MaskTransition: (width, height, rng) -> float32 array (h, w)
+# where low values are revealed first. Values needn't be spread evenly:
+# MaskTransition equalizes them so the revealed area grows steadily.
+# ----------------------------------------------------------------------
+MaskFn = Callable[[int, int, random.Random], np.ndarray]
+
+
+def _grid(w: int, h: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Pixel-centre coordinates scaled to 0..1 on the longer side (so shapes aren't stretched)."""
+    size = max(w, h)
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    return (xs + 0.5) / size, (ys + 0.5) / size
+
+
+def _value_noise(w: int, h: int, cells: int, rng: random.Random) -> np.ndarray:
+    """
+    Smooth random values: random numbers on a coarse grid (`cells` across the
+    longer side), blended between grid points with smoothstep. Kept in
+    float32 so neighbouring pixels practically never tie (ties would be
+    revealed in raster order, as hard lines).
+    """
+    cells_x = max(1, round(cells * w / max(w, h)))
+    cells_y = max(1, round(cells * h / max(w, h)))
+    grid = np.array([[rng.random() for _ in range(cells_x + 1)] for _ in range(cells_y + 1)], dtype=np.float32)
+
+    def axis(n_pixels: int, n_cells: int):
+        pos = (np.arange(n_pixels, dtype=np.float32) + 0.5) * n_cells / n_pixels
+        i = np.minimum(pos.astype(np.int32), n_cells - 1)
+        t = pos - i
+        return i, t * t * (3.0 - 2.0 * t)
+
+    ix, tx = axis(w, cells_x)
+    iy, ty = axis(h, cells_y)
+    tx, ty = tx[None, :], ty[:, None]
+    top = grid[iy][:, ix] * (1 - tx) + grid[iy][:, ix + 1] * tx
+    bottom = grid[iy + 1][:, ix] * (1 - tx) + grid[iy + 1][:, ix + 1] * tx
+    return top * (1 - ty) + bottom * ty
+
+
+def mask_noise(w: int, h: int, rng: random.Random) -> np.ndarray:
+    """Soft random blobs: a dissolve that blooms in patches."""
+    return _value_noise(w, h, 6, rng) + 0.35 * _value_noise(w, h, 17, rng)
+
+
+def mask_linear(w: int, h: int, rng: random.Random) -> np.ndarray:
+    """A straight wipe at a random angle."""
+    xs, ys = _grid(w, h)
+    angle = rng.uniform(0.0, 2.0 * math.pi)
+    return xs * math.cos(angle) + ys * math.sin(angle)
+
+
+def mask_radial(w: int, h: int, rng: random.Random) -> np.ndarray:
+    """A circle opening from a random point (or closing in on it)."""
+    xs, ys = _grid(w, h)
+    cx, cy = rng.uniform(0.2, 0.8) * w / max(w, h), rng.uniform(0.2, 0.8) * h / max(w, h)
+    distance = np.hypot(xs - cx, ys - cy)
+    return distance if rng.random() < 0.5 else -distance
+
+
+def mask_clock(w: int, h: int, rng: random.Random) -> np.ndarray:
+    """A clock-hand sweep around the centre, from a random start, either way round."""
+    xs, ys = _grid(w, h)
+    cx, cy = 0.5 * w / max(w, h), 0.5 * h / max(w, h)
+    angle = np.arctan2(ys - cy, xs - cx) - rng.uniform(0.0, 2.0 * math.pi)
+    angle = np.mod(angle, 2.0 * math.pi)
+    return angle if rng.random() < 0.5 else -angle
+
+
+def mask_blinds(w: int, h: int, rng: random.Random) -> np.ndarray:
+    """Venetian blinds: stripes that all open at once, vertical or horizontal."""
+    xs, ys = _grid(w, h)
+    bands = rng.randint(5, 10)
+    coord = xs * max(w, h) / w if rng.random() < 0.5 else ys * max(w, h) / h  # 0..1 across the tile
+    # Small tie-breaker so each stripe opens from one side, not all pixels at once
+    return np.mod(coord * bands, 1.0) + coord * 1e-3
+
+
+MASKS: Dict[str, MaskFn] = {
+    "noise": mask_noise,
+    "linear": mask_linear,
+    "radial": mask_radial,
+    "clock": mask_clock,
+    "blinds": mask_blinds,
+}
+
+
+def equalize(values: np.ndarray) -> np.ndarray:
+    """Replace values by their rank, scaled to 0..1, so any mask reveals area at a steady rate."""
+    flat = values.ravel()
+    ranks = np.empty(flat.size, dtype=np.float32)
+    ranks[np.argsort(flat, kind="stable")] = np.arange(flat.size, dtype=np.float32)
+    return (ranks / max(1, flat.size - 1)).reshape(values.shape)
+
+
+class MaskTransition(Transition):
+    """
+    Reveals the new tile through a grayscale mask (see MASKS): pixels whose
+    mask value is below the progress show the new tile, with a soft edge.
+    """
+    NAME = "mask"
+    # Masks are computed at most this many px on the long side and scaled up
+    # smoothly when drawn; they're smooth, so this costs no visible detail and
+    # keeps large tiles cheap.
+    MAX_MASK_SIZE = 320
+
+    def __init__(self, shape: Optional[str] = None, softness: Optional[float] = None,
+                 rng: Optional[random.Random] = None):
+        cfg = transition_config()
+        self._rng = rng or random.Random()
+        shape = shape or cfg.mask_shape
+        self.shape = self._rng.choice(list(MASKS)) if shape == "random" else shape
+        self.softness = cfg.mask_softness if softness is None else softness
+        self._mask: Optional[np.ndarray] = None  # built on first draw
+
+    @classmethod
+    def mask_size(cls, w: int, h: int) -> Tuple[int, int]:
+        """(width, height) the mask is computed at for a w x h tile."""
+        scale = min(1.0, cls.MAX_MASK_SIZE / max(w, h))
+        return max(1, round(w * scale)), max(1, round(h * scale))
+
+    def mask_for(self, w: int, h: int) -> np.ndarray:
+        """The equalized mask for a w x h tile, at mask_size() resolution."""
+        mw, mh = self.mask_size(w, h)
+        if self._mask is None or self._mask.shape != (mh, mw):
+            self._mask = equalize(MASKS[self.shape](mw, mh, self._rng))
+        return self._mask
+
+    def alpha(self, w: int, h: int, progress: float) -> np.ndarray:
+        """Opacity of the new tile, 0..1, per mask pixel (mask_size() resolution)."""
+        mask = self.mask_for(w, h)
+        soft = self.softness
+        if soft <= 0.0:
+            return (mask < progress).astype(np.float32)
+        # Stretched so the soft edge starts fully outside at 0 and ends fully inside at 1
+        return np.clip((progress * (1.0 + soft) - mask) / soft, 0.0, 1.0)
+
+    def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+        old.draw(painter)
+        w, h = int(new.width), int(new.height)
+        if progress <= 0.0 or w <= 0 or h <= 0:
+            return
+        x = int(new.x)
+
+        alpha = self.alpha(w, h, progress)
+        mh, mw = alpha.shape
+        stride = (mw + 3) // 4 * 4  # QImage rows are 32-bit aligned
+        alpha8 = np.zeros((mh, stride), dtype=np.uint8)
+        alpha8[:, :mw] = (alpha * 255.0 + 0.5).astype(np.uint8)
+        alpha_image = QImage(alpha8.data, mw, mh, stride, QImage.Format.Format_Alpha8)
+
+        # Draw the new tile into its own layer, cut it out with the mask, then put it on top
+        layer = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+        layer.fill(Qt.GlobalColor.transparent)
+        layer_painter = QPainter(layer)
+        layer_painter.translate(-x, 0)
+        new.draw(layer_painter)
+        layer_painter.resetTransform()
+        layer_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        layer_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        layer_painter.drawImage(QRectF(0, 0, w, h), alpha_image)  # scaled up to the tile
+        layer_painter.end()
+        painter.drawImage(x, 0, layer)
+
+
 TRANSITIONS: Dict[str, Type[Transition]] = {
-    cls.NAME: cls for cls in (FadeTransition, StarSwipeTransition)
+    cls.NAME: cls for cls in (FadeTransition, StarSwipeTransition, ZoomTransition, SpinTransition, MaskTransition)
 }
 
 
@@ -125,9 +356,11 @@ TRANSITIONS: Dict[str, Type[Transition]] = {
 # ----------------------------------------------------------------------
 @dataclass(frozen=True)
 class TransitionConfig:
-    type: str          # "random", "none", or a key of TRANSITIONS
-    seconds: float     # >= 0; 0 = no transition
-    star_points: int   # 3..12
+    type: str             # "random", "none", or a key of TRANSITIONS
+    seconds: float        # >= 0; 0 = no transition
+    star_points: int      # 3..12
+    mask_shape: str       # "random" or a key of MASKS
+    mask_softness: float  # 0..1; width of the mask's soft edge
 
 
 @section_config
@@ -139,10 +372,17 @@ def transition_config() -> TransitionConfig:
         logger.error("Setting \"%s.type\" must be \"random\", \"none\" or one of %s, got %r. Using \"random\".",
                      SETTINGS_SECTION, list(TRANSITIONS), kind)
         kind = "random"
+    shape = section.get("mask shape")
+    if shape != "random" and shape not in MASKS:
+        logger.error("Setting \"%s.mask shape\" must be \"random\" or one of %s, got %r. Using \"random\".",
+                     SETTINGS_SECTION, list(MASKS), shape)
+        shape = "random"
     return TransitionConfig(
         type=kind,
         seconds=max(0.0, section.get_number("seconds")),
         star_points=min(12, max(3, section.get_number("star points", int))),
+        mask_shape=shape,
+        mask_softness=min(1.0, max(0.0, section.get_number("mask softness"))),
     )
 
 

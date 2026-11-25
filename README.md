@@ -16,6 +16,7 @@ Basically it's a scrolling screensaver implemented in Python using PySide6.
 - Animations
 - Layered tiles and composing
 - Change scrolling direction
+- Transitions
 # Future Features
 - Color hue cycling
 - Text composing with the ability to fetch text from external sources
