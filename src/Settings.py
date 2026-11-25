@@ -120,6 +120,13 @@ class Settings(SettingsSection):
             "hold seconds": 5,   # minimum time a finished maze is shown before it may be swapped
             "flash seconds": 3,  # after solving, flash the solution this long; no swap until it ends
         },
+        # How a swapped tile changes to its new asset (src/Transitions.py)
+        "tile transition": {
+            # "random" (a different pick each swap), "none", or one of: fade, star swipe
+            "type": "random",
+            "seconds": 1.0,      # transition length; 0 = swap instantly
+            "star points": 5,    # star swipe: number of points (3..12)
+        },
     }
 
     def __init__(self, path: str = DEFAULT_SETTINGS_PATH):

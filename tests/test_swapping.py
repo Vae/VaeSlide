@@ -65,7 +65,11 @@ def test_swap_after_random_delay_in_range(tile_type, clock):
     for x in range(100, 900, 100):
         assert after[x] is not before[x], f"tile at x={x} should have swapped"
         assert after[x].meta_tile.resource_filename != before[x].meta_tile.resource_filename
-        assert before[x].removed_called
+        # The old tile stays alive for the transition (default 1 s), then is released
+        assert after[x].transition.old is before[x] and not before[x].removed_called
+    frame(strip, clock, 5.02)
+    for x in range(100, 900, 100):
+        assert after[x].transition is None and before[x].removed_called
     # The edge margin protects the tiles at the screen edges
     assert after[0] is before[0]
     assert after[900] is before[900]
