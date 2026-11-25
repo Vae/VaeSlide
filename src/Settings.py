@@ -40,6 +40,21 @@ class SettingsSection:
                          self._name(key), value, default)
             return cast(default)
 
+    def get_range(self, key: str) -> tuple[float, float]:
+        """
+        Return a [min, max] setting as a (min, max) tuple of floats. A single
+        number is accepted as [n, n]. Reversed bounds are swapped. Falls back
+        to the default if the value is invalid.
+        """
+        value = self._values.get(key)
+        parsed = _parse_range(value)
+        if parsed is None:
+            default = self._defaults[key]
+            logger.error("Setting \"%s\" must be [min, max] numbers, got %r. Using default %r.",
+                         self._name(key), value, default)
+            parsed = _parse_range(default)
+        return parsed
+
     def section(self, key: str) -> "SettingsSection":
         """A nested settings dict, e.g. settings.section("tile video")."""
         return SettingsSection(self._values.get(key, {}), self._defaults.get(key, {}), self._name(key))
@@ -66,7 +81,9 @@ class Settings(SettingsSection):
         "global speed": 1.0,  # multiplier applied to every layer's speed
         "tile gap": -1,       # px between tiles (0 = seamless, negative = overlap)
         "wheel speed step": 0.25,  # px/frame added or removed per mouse wheel notch
-        "tile swap seconds": 10.0,  # on-screen time before a tile swaps to a same-aspect asset; <= 0 disables
+        # [min, max] on-screen seconds before a tile swaps to a same-aspect asset.
+        # Each tile picks a random time in this range (fractions allowed); max <= 0 disables
+        "tile swap seconds": [8.0, 12.0],
         "tile swap edge margin": 100,  # px; tiles closer than this to a screen edge (or off it) aren't swapped
         "asset loader threads": 2,  # worker threads that decode and scale images (minimum 1)
         # Parallax layers, back to front. speed is in px/frame; overlap is a
@@ -78,7 +95,7 @@ class Settings(SettingsSection):
         ],
         # Settings for video tiles (TileVideo)
         "tile video": {
-            "tile swap seconds": 10.0,  # like the top-level one, but for video tiles
+            "tile swap seconds": [8.0, 12.0],  # [min, max], like the top-level one, but for video tiles
             # Video odds are multiplied by this once per video tile currently loaded.
             # 1.0 = no effect; 0.5 = each loaded video halves the odds; 0 = one video at a time
             "weight per loaded video": 1.0,
@@ -124,6 +141,20 @@ class Settings(SettingsSection):
             return
         _merge(self._values, data)
         logger.debug("Loaded settings from %s", self.path)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _parse_range(value: Any) -> Optional[tuple[float, float]]:
+    """[min, max] or a single number -> (min, max) with min <= max; None if invalid."""
+    if _is_number(value):
+        return float(value), float(value)
+    if isinstance(value, (list, tuple)) and len(value) == 2 and all(_is_number(v) for v in value):
+        lo, hi = float(value[0]), float(value[1])
+        return (lo, hi) if lo <= hi else (hi, lo)
+    return None
 
 
 def _merge(target: dict[str, Any], overrides: dict[str, Any], path: str = "") -> None:

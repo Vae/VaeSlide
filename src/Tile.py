@@ -33,6 +33,8 @@ class Tile:
         self._height = h
         # time.monotonic() when the tile last came on screen; None while off screen
         self.visible_since: float | None = None
+        # Random on-screen seconds before a swap, picked by the strip each time the clock starts
+        self.swap_after: float | None = None
         # Set when the tile's asset could not be loaded; it will never become ready
         self.load_failed = False
 
@@ -69,9 +71,10 @@ class Tile:
         """
         return 1.0
 
-    def swap_seconds(self, default: float) -> float:
+    def swap_seconds(self, default: tuple[float, float]) -> tuple[float, float]:
         """
-        On-screen seconds before this tile is swapped; <= 0 means never.
+        (min, max) on-screen seconds before this tile is swapped; the strip
+        picks a random time in this range. max <= 0 means never.
         `default` is the strip's top-level "tile swap seconds". Subclasses
         can override it with a value from their own settings section.
         """

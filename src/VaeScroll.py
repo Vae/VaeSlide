@@ -88,7 +88,7 @@ class EndlessScrollWidget(QWidget):
         # Multiplier on every layer's speed; an explicit argument overrides settings.json
         self._speed_scale = speed_scale if speed_scale is not None else self._settings.get_number("global speed")
         gap_px = self._settings.get_number("tile gap", int)
-        swap_seconds = self._settings.get_number("tile swap seconds")
+        swap_seconds = self._settings.get_range("tile swap seconds")
         swap_edge_margin = self._settings.get_number("tile swap edge margin")
         self._resourceLoader = ResourceLoader()
         # Image decoding and scaling run on this pool so the GUI thread never blocks on disk

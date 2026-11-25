@@ -43,11 +43,12 @@ class HorizontalStrip:
     layouts can run side by side without affecting each other.
     """
 
-    def __init__(self, asset_loader: AssetLoader, gap_px: int = -1, swap_seconds: float = 0.0,
-                 swap_edge_margin: float = 0.0):
+    def __init__(self, asset_loader: AssetLoader, gap_px: int = -1,
+                 swap_seconds: tuple[float, float] = (0.0, 0.0), swap_edge_margin: float = 0.0):
         """
-        swap_seconds:     a tile that has been on screen this long is swapped for
-                          another asset with the same aspect ratio. <= 0 disables.
+        swap_seconds:     (min, max). A tile that has been on screen for a random
+                          time in this range is swapped for another asset with
+                          the same aspect ratio. max <= 0 disables.
         swap_edge_margin: tiles must be fully on screen and at least this many px
                           from both screen edges to be swapped.
         """
@@ -256,16 +257,16 @@ class HorizontalStrip:
             if tile in self._pending_swaps:
                 continue
             # Per tile type: videos use "tile video" -> "tile swap seconds"
-            swap_seconds = tile.swap_seconds(self._swap_seconds)
-            if swap_seconds <= 0:
+            swap_min, swap_max = tile.swap_seconds(self._swap_seconds)
+            if swap_max <= 0:
                 continue
             if tile.right <= 0 or tile.x >= self._width:
                 tile.visible_since = None  # off screen: restart the clock when it comes back
                 continue
             if tile.visible_since is None:
-                tile.visible_since = now
+                self._start_swap_clock(tile, now, swap_min, swap_max)
                 continue
-            if now - tile.visible_since < swap_seconds:
+            if now - tile.visible_since < tile.swap_after:
                 continue
             # Don't swap tiles that are near or past an edge. The clock keeps
             # running, so an entering tile swaps once it is far enough in.
@@ -278,7 +279,7 @@ class HorizontalStrip:
                 continue
 
             # Restart the clock either way, so a tile with no match isn't re-checked every frame
-            tile.visible_since = now
+            self._start_swap_clock(tile, now, swap_min, swap_max)
 
             old_meta = tile.meta_tile
             candidates = [
@@ -294,6 +295,12 @@ class HorizontalStrip:
             new_tile = self._create_tile(new_meta, tile.x)
             if new_tile is not None:
                 self._pending_swaps[tile] = new_tile
+
+    @staticmethod
+    def _start_swap_clock(tile: Tile, now: float, swap_min: float, swap_max: float) -> None:
+        """Start the tile's swap clock with a fresh random delay in [swap_min, swap_max]."""
+        tile.visible_since = now
+        tile.swap_after = random.uniform(max(0.0, swap_min), swap_max)
 
     def _complete_pending_swaps(self) -> None:
         """Put replacement tiles in place once their assets have loaded."""
@@ -312,7 +319,7 @@ class HorizontalStrip:
             if not new_tile.is_ready():
                 continue
             new_tile.x = old_tile.x  # the old tile kept scrolling while we waited
-            new_tile.visible_since = time.monotonic()
+            new_tile.visible_since = None  # next frame starts its clock with a fresh random delay
             old_tile.removed()
             self._tiles[i] = new_tile
             del self._pending_swaps[old_tile]

@@ -51,7 +51,7 @@ class ScrollLayer:
     """One parallax layer: a TileLayout, a vertical offset and a speed."""
 
     def __init__(self, config: LayerConfig, asset_loader: AssetLoader, gap_px: int = -1,
-                 swap_seconds: float = 0.0, swap_edge_margin: float = 0.0):
+                 swap_seconds: tuple[float, float] = (0.0, 0.0), swap_edge_margin: float = 0.0):
         self.config = config
         self.layout = HorizontalStrip(asset_loader, gap_px, swap_seconds, swap_edge_margin)
         self.y = 0

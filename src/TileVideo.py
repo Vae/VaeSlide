@@ -47,7 +47,7 @@ class TileVideoAssetManager(AssetManager):
             # full_path = os.path.join(video_dir, video_file)
             full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
             width, height = get_video_dim(full_path, media_cache)
-            metaTile = MetaTile(weight=Weight(5000.0), type="video", json_filename="", resource_filename=full_path,
+            metaTile = MetaTile(weight=Weight(10000.0), type="video", json_filename="", resource_filename=full_path,
                                 width=width,
                                 height=height)
             meta_tiles.append(metaTile)
@@ -73,7 +73,7 @@ class TileVideo(Tile):
         self._counted = True
 
         self._videoFilePath = video_filename
-        self._swap_seconds = get_settings().section(SETTINGS_SECTION).get_number("tile swap seconds")
+        self._swap_seconds = get_settings().section(SETTINGS_SECTION).get_range("tile swap seconds")
 
         self.scaled_img = QImage()
         self.player = QMediaPlayer()
@@ -170,7 +170,7 @@ class TileVideo(Tile):
             TileVideo._weight_per_loaded_video = factor
         return cls._weight_per_loaded_video ** TileVideo.active_count
 
-    def swap_seconds(self, default: float) -> float:
+    def swap_seconds(self, default: tuple[float, float]) -> tuple[float, float]:
         return self._swap_seconds  # from settings.json "tile video" section
 
     def can_swap(self) -> bool:

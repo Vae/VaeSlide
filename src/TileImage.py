@@ -69,7 +69,7 @@ class TileImageAssetManager(AssetManager):
             png_path = os.path.join(path_to_images, png_name).replace('\\', '/')
             json_path = os.path.join(path_to_images, base + ".json").replace('\\', '/')
 
-            weight = Weight(500.0)
+            weight = Weight(10000.0)
             width = 0
             height = 0
             if os.path.isfile(json_path):
