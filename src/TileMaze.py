@@ -12,11 +12,11 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from src.AssetManager import AssetManager
+from src.AssetScanner import AssetScanner
 from src.MazeGenerators import ALGORITHMS, Cell
 from src.MediaCache import MediaCache
-from src.Settings import get_settings
-from src.Tile import MetaTile, Tile, Weight
+from src.Settings import get_settings, section_config
+from src.Tile import MetaTile, Tile, TileContext, Weight
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +42,9 @@ class MazeConfig:
     flash_seconds: float
 
 
-_config: Optional[MazeConfig] = None
-
-
+@section_config
 def maze_config() -> MazeConfig:
     """Validated "tile maze" settings, read once."""
-    global _config
-    if _config is not None:
-        return _config
     section = get_settings().section(SETTINGS_SECTION)
     defaults = get_settings().DEFAULTS[SETTINGS_SECTION]
 
@@ -77,7 +72,7 @@ def maze_config() -> MazeConfig:
 
     wall_size = min(0.9, max(0.05, section.get_number("wall size")))
 
-    _config = MazeConfig(
+    return MazeConfig(
         count=max(0, section.get_number("count", int)),
         weight=max(0.0, section.get_number("weight")),
         cols=cols,
@@ -89,7 +84,6 @@ def maze_config() -> MazeConfig:
         hold_seconds=max(0.0, section.get_number("hold seconds")),
         flash_seconds=max(0.0, section.get_number("flash seconds")),
     )
-    return _config
 
 
 def _random_palette(rng: random.Random) -> Dict[str, QColor]:
@@ -109,17 +103,19 @@ def _random_palette(rng: random.Random) -> Dict[str, QColor]:
     }
 
 
-class TileMazeAssetManager(AssetManager):
+class TileMazeScanner(AssetScanner):
     """Creates the maze entries for the selection pool from settings (there are no files)."""
 
-    def load_assets(self, media_cache: MediaCache, path_to_assets: str = "") -> list[MetaTile]:
+    NEEDS_PATH = False
+
+    def scan(self, media_cache: MediaCache, path: Optional[str] = None) -> list[MetaTile]:
         cfg = maze_config()
         # The aspect ratio of the drawn maze: cols cells plus one extra wall
         f = cfg.wall_size
         width = round((cfg.cols + f) * 1000)
         height = round((cfg.rows + f) * 1000)
         meta_tiles = [
-            MetaTile(weight=Weight(cfg.weight), type="maze", width=width, height=height,
+            MetaTile(weight=Weight(cfg.weight), type=TileMaze.TYPE, width=width, height=height,
                      resource_filename=f"maze:{i}", json_filename="")
             for i in range(cfg.count)
         ]
@@ -135,8 +131,11 @@ class TileMaze(Tile):
     from the top-left entrance to the bottom-right exit.
     """
 
-    def __init__(self, meta_tile: MetaTile, x: float, h: int):
-        super().__init__(meta_tile=meta_tile, x=x, h=h)
+    TYPE = "maze"
+    SCANNER = TileMazeScanner
+
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, ctx: TileContext):
+        super().__init__(meta_tile, x, h, ctx)
         cfg = maze_config()
         self._cfg = cfg
         self._cols, self._rows = cfg.cols, cfg.rows

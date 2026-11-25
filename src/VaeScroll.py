@@ -2,20 +2,20 @@
 """
 Endless Scroll Screensaver
 ==========================
-A PySide6-based screensaver featuring a seamless horizontal image scroll.
-Images are loaded from the ./assets folder. Each .png has a paired .json
-containing a "weight" field that controls how frequently it appears.
+A PySide6-based screensaver featuring seamless horizontal parallax scrolling.
+Asset folders come from assets.json and settings from settings.json.
 
-Usage:
-    python screensaver.py             # fullscreen across all monitors
-    python screensaver.py --window    # windowed mode for testing
-    python screensaver.py --speed 2.0 # override "global speed" from settings.json
+Usage (from the repo root):
+    python -m src.VaeScroll             # fullscreen across all monitors
+    python -m src.VaeScroll --window    # windowed mode for testing
+    python -m src.VaeScroll --speed 2.0 # override "global speed" from settings.json
 """
 
-import json
 import argparse
 import logging
+import os
 import shutil
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -23,43 +23,17 @@ from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtGui import QPainter, QColor, QSurfaceFormat
 from PySide6.QtCore import QTimer, Qt
 
-from src.ResourceLoader import ResourceLoader
+from src import Diagnostics
 from src.AssetLoader import AssetLoader
-from src.Tile import Weight, MetaTile
+from src.AssetScanner import read_asset_sources
+from src.ImageCache import ImageCache
 from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig, parse_layer_configs
-from src.TileImage import TileImageAssetManager
-from src.TileVideo import TileVideoAssetManager
-from src.TileMaze import TileMazeAssetManager
 from src.Settings import Settings, get_settings
+from src.Tile import MetaTile, TileContext
+from src.TileTypes import TILE_TYPES
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
-import faulthandler, sys, threading, logging, os
-from PySide6 import QtCore
-
-# Dumps the Python stack of ALL threads on SIGSEGV/SIGABRT/etc.
-_crash_log = open("crash.log", "a", buffering=1)
-faulthandler.enable(file=_crash_log, all_threads=True)
-
-# Optional: dump all stacks every 60s, which helps if it hangs rather than crashes
-# faulthandler.dump_traceback_later(60, repeat=True, file=_crash_log)
-
-# Make sure uncaught exceptions in any thread are logged
-sys.excepthook = lambda *a: logging.critical("Uncaught", exc_info=a)
-threading.excepthook = lambda args: logging.critical(
-    "Uncaught in thread %s", args.thread, exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
-
-# Route Qt's own warnings (which often precede a crash) into your log
-def _qt_handler(mode, ctx, msg):
-    logging.warning("Qt[%s] %s (%s:%s)", mode.name, msg, ctx.file, ctx.line)
-
-QtCore.qInstallMessageHandler(_qt_handler)
-
-# Verbose multimedia logging
-os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=true")
-os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
 def load_layer_configs() -> List[LayerConfig]:
     """Layer configs from settings.json, falling back to the built-in defaults."""
@@ -87,12 +61,9 @@ class EndlessScrollWidget(QWidget):
         self._settings = get_settings()
         # Multiplier on every layer's speed; an explicit argument overrides settings.json
         self._speed_scale = speed_scale if speed_scale is not None else self._settings.get_number("global speed")
-        gap_px = self._settings.get_number("tile gap", int)
-        swap_seconds = self._settings.get_range("tile swap seconds")
-        swap_edge_margin = self._settings.get_number("tile swap edge margin")
-        self._resourceLoader = ResourceLoader()
+        self._image_cache = ImageCache()
         # Image decoding and scaling run on this pool so the GUI thread never blocks on disk
-        self._asset_loader = AssetLoader(self._resourceLoader,
+        self._asset_loader = AssetLoader(self._image_cache,
                                          self._settings.get_number("asset loader threads", int))
         # Covers every way out (window close, any-key quit) so queued loads are dropped
         QApplication.instance().aboutToQuit.connect(self._asset_loader.shutdown)
@@ -101,9 +72,10 @@ class EndlessScrollWidget(QWidget):
         # Master list; each layer receives its own copy in build_layers()
         self._meta_tiles: List[MetaTile] = []
 
+        # Gap and swap settings come from strip_config() in HorizontalStrip.py
+        tile_ctx = TileContext(asset_loader=self._asset_loader)
         self._layers: List[ScrollLayer] = [
-            ScrollLayer(cfg, self._asset_loader, gap_px, swap_seconds, swap_edge_margin)
-            for cfg in (layers or load_layer_configs())
+            ScrollLayer(cfg, tile_ctx) for cfg in (layers or load_layer_configs())
         ]
 
         # Background color visible in gaps (if any)
@@ -120,12 +92,6 @@ class EndlessScrollWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAcceptDrops(True)
-
-        self._video_files = []
-
-        self._TileImageAssetManager = TileImageAssetManager()
-        self._TileVideoAssetManager = TileVideoAssetManager()
-
 
     # ------------------------------------------------------------------
     # Window / monitor setup
@@ -267,30 +233,30 @@ class EndlessScrollWidget(QWidget):
         self._timer.stop()
         QApplication.quit()
 
-    def _add_meta_tiles(self, meta_tiles: Optional[list[MetaTile]]):
-        self._meta_tiles.extend(meta_tiles or [])
+    # ------------------------------------------------------------------
+    # Asset loading (call before build_layers)
+    # ------------------------------------------------------------------
+    def load_assets(self, tile_type: str, path: Optional[str] = None) -> None:
+        """Add the MetaTiles of one tile type, scanning `path` if that type needs a folder."""
+        cls = TILE_TYPES.get(tile_type)
+        if cls is None or cls.SCANNER is None:
+            logger.error("Unknown tile type %r (known: %s); skipping %s.", tile_type, list(TILE_TYPES), path)
+            return
+        self._meta_tiles.extend(cls.SCANNER().scan(self._mediaCache, path))
 
-    def load_images(self, path: str):
-        self._add_meta_tiles(self._TileImageAssetManager.load_assets(self._mediaCache, path))
-
-    def load_videos(self, path: str):
-        self._add_meta_tiles(self._TileVideoAssetManager.load_assets(self._mediaCache, path))
-
-    def load_mazes(self):
-        """Add the procedural maze entries configured under "tile maze"."""
-        self._add_meta_tiles(TileMazeAssetManager().load_assets(self._mediaCache))
-
-class VaeScroll:
-    def __init__(self):
-        self.media_cache = MediaCache()
-        self.resource_loader = ResourceLoader()
-        #self.endless_scroll_widget = EndlessScrollWidget(self.media_cache, self.resource_loader)
+    def load_procedural_assets(self) -> None:
+        """Add the entries of every tile type that needs no folder (e.g. mazes)."""
+        for tile_type, cls in TILE_TYPES.items():
+            if cls.SCANNER is not None and not cls.SCANNER.NEEDS_PATH:
+                self.load_assets(tile_type)
 
 
 # ======================================================================
 # Entry point
 # ======================================================================
 def main() -> None:
+    Diagnostics.install()
+
     parser = argparse.ArgumentParser(description="VaeSlide")
     parser.add_argument("--window", action="store_true",
                         help="Run in a window instead of fullscreen (for testing)")
@@ -313,24 +279,10 @@ def main() -> None:
 
     widget = EndlessScrollWidget(fullscreen=fullscreen, speed_scale=args.speed)
 
-    # Load paths from settings.json
-    assets_path = os.path.join(os.path.dirname("."), "assets.json")
-    try:
-        with open(assets_path, "r", encoding="utf-8") as f:
-            assets_settings = json.load(f)
-    except Exception as e:
-        logger.error(f"Could not load settings.json: {e}")
-        assets_settings = {"image_paths": [], "video_paths": []}
-
-    for img_path in assets_settings.get("image_paths", []):
-        if Path(img_path).is_dir and not img_path.startswith("#"):
-            widget.load_images(img_path.replace('\\', '/'))
-
-    for vid_path in assets_settings.get("video_paths", []):
-        if Path(vid_path).is_dir and not vid_path.startswith("#"):
-            widget.load_videos(vid_path.replace('\\', '/'))
-
-    widget.load_mazes()
+    # Asset folders from assets.json (missing and "#"-disabled folders are skipped)
+    for tile_type, path in read_asset_sources():
+        widget.load_assets(tile_type, path)
+    widget.load_procedural_assets()
 
     widget.build_layers()
     widget.show()

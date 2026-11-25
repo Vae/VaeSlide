@@ -2,25 +2,35 @@ import logging
 import math
 import random
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtGui import QPainter
 
-from src.AssetLoader import AssetLoader
-from src.Tile import MetaTile, Tile, Weight
-from src.TileImage import TileImage
-from src.TileVideo import TileVideo
-from src.TileMaze import TileMaze
+from src.Settings import get_settings, section_config
+from src.Tile import MetaTile, Tile, TileContext, Weight
+from src.TileTypes import TILE_TYPES, create_tile
 
 logger = logging.getLogger(__name__)
 
-# MetaTile.type -> Tile subclass
-TILE_CLASSES = {
-    "image": TileImage,
-    "video": TileVideo,
-    "maze": TileMaze,
-}
+
+@dataclass(frozen=True)
+class StripConfig:
+    """Top-level settings.json values that control every strip."""
+    gap_px: int                        # px between tiles (0 = seamless, negative = overlap)
+    swap_seconds: tuple[float, float]  # (min, max) on-screen seconds before a swap; max <= 0 disables
+    swap_edge_margin: float            # px; tiles closer than this to a screen edge aren't swapped
+
+
+@section_config
+def strip_config() -> StripConfig:
+    """Validated strip settings, read once."""
+    settings = get_settings()
+    return StripConfig(
+        gap_px=settings.get_number("tile gap", int),
+        swap_seconds=settings.get_range("tile swap seconds"),
+        swap_edge_margin=settings.get_number("tile swap edge margin"),
+    )
 
 
 def _aspect_key(meta_tile: MetaTile) -> Optional[Tuple[int, int]]:
@@ -43,19 +53,19 @@ class HorizontalStrip:
     layouts can run side by side without affecting each other.
     """
 
-    def __init__(self, asset_loader: AssetLoader, gap_px: int = -1,
-                 swap_seconds: tuple[float, float] = (0.0, 0.0), swap_edge_margin: float = 0.0):
+    def __init__(self, ctx: TileContext, config: Optional[StripConfig] = None):
         """
-        swap_seconds:     (min, max). A tile that has been on screen for a random
-                          time in this range is swapped for another asset with
-                          the same aspect ratio. max <= 0 disables.
-        swap_edge_margin: tiles must be fully on screen and at least this many px
-                          from both screen edges to be swapped.
+        ctx:    passed to every tile this strip creates.
+        config: gap and swap settings; defaults to strip_config() from settings.json.
+                A tile that has been on screen for a random time in
+                config.swap_seconds is swapped for another asset with the same
+                aspect ratio, if it is at least swap_edge_margin px from both edges.
         """
-        self._asset_loader = asset_loader
-        self._gap_px = gap_px
-        self._swap_seconds = swap_seconds
-        self._swap_edge_margin = swap_edge_margin
+        config = config or strip_config()
+        self._ctx = ctx
+        self._gap_px = config.gap_px
+        self._swap_seconds = config.swap_seconds
+        self._swap_edge_margin = config.swap_edge_margin
         self._meta_tiles: List[MetaTile] = []
         # Meta tiles grouped by reduced aspect ratio (w, h), used for swapping
         self._by_aspect: Dict[Tuple[int, int], List[MetaTile]] = {}
@@ -99,10 +109,10 @@ class HorizontalStrip:
         """
         # Hard limits first: drop types that can't be selected right now
         allowed = {
-            t for t, cls in TILE_CLASSES.items()
+            t for t, cls in TILE_TYPES.items()
             if any(mt.type == t for mt in candidates) and cls.can_select(replacing)
         }
-        candidates = [mt for mt in candidates if mt.type in allowed or mt.type not in TILE_CLASSES]
+        candidates = [mt for mt in candidates if mt.type in allowed or mt.type not in TILE_TYPES]
         if not candidates:
             return None
 
@@ -110,7 +120,7 @@ class HorizontalStrip:
         # (e.g. TileVideo lowers video odds as more videos are loaded)
         multipliers = {
             t: cls.selection_weight_multiplier()
-            for t, cls in TILE_CLASSES.items()
+            for t, cls in TILE_TYPES.items()
             if any(mt.type == t for mt in candidates)
         }
         weights = [mt.weight.value * multipliers.get(mt.type, 1.0) for mt in candidates]
@@ -134,15 +144,8 @@ class HorizontalStrip:
         return self._create_tile(meta_tile, x)
 
     def _create_tile(self, meta_tile: MetaTile, x: float) -> Optional[Tile]:
-        if meta_tile.type == "image":
-            # Returns immediately; the image loads on the asset_loader threads
-            return TileImage(meta_tile=meta_tile, x=x, h=self._height, asset_loader=self._asset_loader)
-        if meta_tile.type == "video":
-            return TileVideo(video_filename=meta_tile.resource_filename, x=x,
-                             h=self._height, meta_tile=meta_tile)
-        if meta_tile.type == "maze":
-            return TileMaze(meta_tile=meta_tile, x=x, h=self._height)
-        return None
+        # Returns immediately; images load on the asset_loader threads
+        return create_tile(meta_tile, x, self._height, self._ctx)
 
     # ------------------------------------------------------------------
     # Layout

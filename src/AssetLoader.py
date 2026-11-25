@@ -6,7 +6,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
-from src.ResourceLoader import ResourceLoader
+from src.ImageCache import ImageCache
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class AssetLoader:
     failed.
     """
 
-    def __init__(self, resource_loader: ResourceLoader, num_threads: int):
-        self._resource_loader = resource_loader
+    def __init__(self, image_cache: ImageCache, num_threads: int):
+        self._image_cache = image_cache
         self._num_threads = max(1, int(num_threads))
         self._executor = ThreadPoolExecutor(max_workers=self._num_threads,
                                             thread_name_prefix="asset_loader")
@@ -74,7 +74,7 @@ class AssetLoader:
     # ------------------------------------------------------------------
     def _load_scaled(self, path: str, height: int,
                      transform: Optional[Callable[[QImage], QImage]]) -> Optional[QImage]:
-        image = self._resource_loader.get_image(path)
+        image = self._image_cache.get_image(path)
         if image is None:
             return None
         scaled = image.scaledToHeight(height, Qt.SmoothTransformation)

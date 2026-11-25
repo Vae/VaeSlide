@@ -1,22 +1,50 @@
 import logging
 import os
+from dataclasses import dataclass
+from typing import Optional
 
 from PySide6 import QtCore
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 
+from PySide6.QtGui import QPainter, QImage
+
 from moviepy import VideoFileClip
 
-from src.AssetManager import AssetManager
+from src.AssetScanner import AssetScanner
 from src.MediaCache import MediaCache
-from src.Settings import get_settings
-from src.Tile import Tile, MetaTile, Weight
+from src.Settings import get_settings, section_config
+from src.Tile import Tile, TileContext, MetaTile, Weight
 
-VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mkv", ".mov", ".avi"}
+# .gif is played through QMediaPlayer like the others
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mkv", ".mov", ".avi", ".gif"}
 SETTINGS_SECTION = "tile video"  # this module's section in settings.json
 
-from PySide6.QtGui import QPainter, QImage
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class VideoConfig:
+    swap_seconds: tuple[float, float]  # (min, max) on-screen seconds before a swap
+    weight_per_loaded_video: float     # >= 0; 1.0 = no effect
+    max_loaded_videos: int             # < 0 = no limit
+
+
+@section_config
+def video_config() -> VideoConfig:
+    """Validated "tile video" settings, read once."""
+    section = get_settings().section(SETTINGS_SECTION)
+    factor = section.get_number("weight per loaded video")
+    if factor < 0:
+        logger.error("Setting \"%s.weight per loaded video\" must be >= 0, got %r. Using 0.",
+                     SETTINGS_SECTION, factor)
+        factor = 0.0
+    return VideoConfig(
+        swap_seconds=section.get_range("tile swap seconds"),
+        weight_per_loaded_video=factor,
+        max_loaded_videos=section.get_number("max loaded videos", int),
+    )
+
 
 def get_video_dim(file_path: str, media_cache: MediaCache = None):
     if media_cache:
@@ -24,56 +52,59 @@ def get_video_dim(file_path: str, media_cache: MediaCache = None):
         if cached:
             return cached
 
-    clip = VideoFileClip(file_path)
-
-    # Get dimensions using .size (returns tuple) or .w and .h
-    width, height = clip.size
+    with VideoFileClip(file_path) as clip:
+        width, height = clip.size
     if media_cache:
         media_cache.add_dimensions(file_path, width, height)
     return width, height
 
-class TileVideoAssetManager(AssetManager):
-    """Manages the loading and caching of video assets for TileVideo objects."""
-    def load_assets(self, media_cache: MediaCache, path_to_assets: str) -> list[MetaTile]:
-        path_to_videos = path_to_assets
-        meta_tiles = []
+
+class TileVideoScanner(AssetScanner):
+    """Builds video MetaTiles from a folder; dimensions come from moviepy (cached)."""
+
+    def scan(self, media_cache: MediaCache, path: Optional[str]) -> list[MetaTile]:
+        if not path or not os.path.isdir(path):
+            logger.warning("Video folder '%s' not found.", path)
+            return []
+
         video_files = sorted(
-            f for f in os.listdir(path_to_videos)
-            if f.lower().endswith(".mp4") or f.lower().endswith(".avi") or f.lower().endswith(
-                ".mov") or f.lower().endswith(".gif")
+            f for f in os.listdir(path)
+            if os.path.splitext(f)[1].lower() in VIDEO_EXTENSIONS
         )
 
+        meta_tiles = []
         for video_file in video_files:
-            # full_path = os.path.join(video_dir, video_file)
-            full_path = os.path.join(path_to_videos, video_file).replace('\\', '/')
-            width, height = get_video_dim(full_path, media_cache)
-            metaTile = MetaTile(weight=Weight(10000.0), type="video", json_filename="", resource_filename=full_path,
-                                width=width,
-                                height=height)
-            meta_tiles.append(metaTile)
+            full_path = os.path.join(path, video_file).replace('\\', '/')
+            try:
+                width, height = get_video_dim(full_path, media_cache)
+            except Exception as exc:  # moviepy raises a variety of errors for unreadable files
+                logger.warning("Skipping %s: could not read its size (%s)", full_path, exc)
+                continue
+            meta_tiles.append(MetaTile(weight=Weight(10000.0), type=TileVideo.TYPE, json_filename="",
+                                       resource_filename=full_path, width=width, height=height))
 
-        logger.info(f"Loaded {len(video_files)} video files from {path_to_videos}")
+        logger.info("Loaded %d video files from %s", len(meta_tiles), path)
         media_cache.save_cache()
         return meta_tiles
 
+
 class TileVideo(Tile):
-    """Holds the pixmap for a tile and provides a generic draw method."""
+    """Plays a looping video with its own QMediaPlayer and draws the latest frame."""
+
+    TYPE = "video"
+    SCANNER = TileVideoScanner
 
     # Number of TileVideo instances that exist and haven't been removed, across
     # all strips (each one owns a QMediaPlayer, so this tracks decoding load)
     active_count = 0
-    # "tile video" -> "weight per loaded video", read once on first use
-    _weight_per_loaded_video: float | None = None
-    # "tile video" -> "max loaded videos", read once on first use
-    _max_loaded_videos: int | None = None
 
-    def __init__(self, meta_tile: MetaTile, x: float, h: int, video_filename: str, ):
-        super().__init__(meta_tile=meta_tile, x=x, h=h)
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, ctx: TileContext):
+        super().__init__(meta_tile, x, h, ctx)
         TileVideo.active_count += 1
         self._counted = True
 
+        video_filename = meta_tile.resource_filename
         self._videoFilePath = video_filename
-        self._swap_seconds = get_settings().section(SETTINGS_SECTION).get_range("tile swap seconds")
 
         self.scaled_img = QImage()
         self.player = QMediaPlayer()
@@ -137,16 +168,8 @@ class TileVideo(Tile):
         self.played_once = True  # don't keep a broken video on screen forever
 
     @classmethod
-    def max_loaded_videos(cls) -> int:
-        """"tile video" -> "max loaded videos"; negative means no limit. Read once."""
-        if cls._max_loaded_videos is None:
-            TileVideo._max_loaded_videos = get_settings().section(SETTINGS_SECTION).get_number(
-                "max loaded videos", int)
-        return cls._max_loaded_videos
-
-    @classmethod
     def can_select(cls, replacing: Tile | None = None) -> bool:
-        cap = cls.max_loaded_videos()
+        cap = video_config().max_loaded_videos
         if cap < 0:
             return True
         count = TileVideo.active_count
@@ -161,17 +184,10 @@ class TileVideo(Tile):
         multiplies the chance of picking another video by the setting.
         1.0 leaves weights unchanged; 0.5 halves the odds per loaded video.
         """
-        if cls._weight_per_loaded_video is None:
-            factor = get_settings().section(SETTINGS_SECTION).get_number("weight per loaded video")
-            if factor < 0:
-                logger.error("\"%s.weight per loaded video\" must be >= 0, got %r. Using 0.",
-                             SETTINGS_SECTION, factor)
-                factor = 0.0
-            TileVideo._weight_per_loaded_video = factor
-        return cls._weight_per_loaded_video ** TileVideo.active_count
+        return video_config().weight_per_loaded_video ** TileVideo.active_count
 
     def swap_seconds(self, default: tuple[float, float]) -> tuple[float, float]:
-        return self._swap_seconds  # from settings.json "tile video" section
+        return video_config().swap_seconds  # from settings.json "tile video" section
 
     def can_swap(self) -> bool:
         return self.played_once

@@ -9,10 +9,9 @@ import numpy as np
 
 from PIL import Image
 
-from src.AssetLoader import AssetLoader
-from src.AssetManager import AssetManager
+from src.AssetScanner import AssetScanner
 from src.MediaCache import MediaCache
-from src.Tile import MetaTile, Tile, Weight
+from src.Tile import MetaTile, Tile, TileContext, Weight
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".xpm"}
 logger = logging.getLogger(__name__)
@@ -50,53 +49,69 @@ def _make_white_transparent(source: QImage) -> QImage:
 
     return image
 
-class TileImageAssetManager(AssetManager):
-    """Manages loading and caching of tile assets."""
-    def load_assets(self, media_cache: MediaCache, path_to_assets: str) -> list[MetaTile]:
-        path_to_images = path_to_assets
-        meta_tiles = []
-        if not os.path.isdir(path_to_images):
-            logger.warning("Asset folder '%s' not found. Place .png + .json files there and re-run.", path_to_images)
-            return
+def _image_size(path: str, media_cache: MediaCache) -> tuple[int, int]:
+    """Image dimensions from the media cache, or by opening the file with Pillow."""
+    cached = media_cache.get_dimensions(path)
+    if cached:
+        return cached
+    with Image.open(path) as img:
+        width, height = img.size
+    media_cache.add_dimensions(path, width, height)
+    return width, height
 
-        png_files = sorted(
-            f for f in os.listdir(path_to_images)
-            if f.lower().endswith(".png") or f.lower().endswith(".jpg") or f.lower().endswith(".jpeg")
+
+def _positive_int(value) -> Optional[int]:
+    """`value` as an int if it is a positive number, else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return int(value)
+
+
+class TileImageScanner(AssetScanner):
+    """Builds image MetaTiles from a folder, using optional <name>.json sidecars."""
+
+    def scan(self, media_cache: MediaCache, path: Optional[str]) -> list[MetaTile]:
+        if not path or not os.path.isdir(path):
+            logger.warning("Image folder '%s' not found.", path)
+            return []
+
+        image_files = sorted(
+            f for f in os.listdir(path)
+            if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
         )
 
-        for png_name in png_files:
-            base, _ = os.path.splitext(png_name)
-            png_path = os.path.join(path_to_images, png_name).replace('\\', '/')
-            json_path = os.path.join(path_to_images, base + ".json").replace('\\', '/')
+        meta_tiles = []
+        for image_name in image_files:
+            base, _ = os.path.splitext(image_name)
+            image_path = os.path.join(path, image_name).replace('\\', '/')
+            json_path = os.path.join(path, base + ".json").replace('\\', '/')
 
             weight = Weight(10000.0)
-            width = 0
-            height = 0
+            width = height = None
             if os.path.isfile(json_path):
                 try:
                     with open(json_path, "r", encoding="utf-8") as fh:
                         meta = json.load(fh)
                     weight = Weight(meta.get("weight", 1))
-                    width = meta.get("width", None)
-                    height = meta.get("height", None)
-                except (json.JSONDecodeError, ValueError, OSError) as exc:
-                    logging.warning(f"Bad JSON for {base}.json: {exc} — defaulting weight to 1")
-            else: # fallback requires opening the image and getting the dimensions
-                cached = media_cache.get_dimensions(png_path)
-                if cached:
-                    width, height = cached
-                else:
-                    with Image.open(png_path) as img:
-                        width, height = img.size
-                    media_cache.add_dimensions(png_path, width, height)
+                    width = _positive_int(meta.get("width"))
+                    height = _positive_int(meta.get("height"))
+                except (json.JSONDecodeError, ValueError, OSError, AttributeError) as exc:
+                    logger.warning("Bad JSON for %s.json: %s; defaulting weight to 1", base, exc)
+                    weight = Weight(1)
+            if width is None or height is None:
+                # No sidecar, or the sidecar has no usable width/height
+                try:
+                    width, height = _image_size(image_path, media_cache)
+                except OSError as exc:
+                    logger.warning("Skipping %s: could not read its size (%s)", image_path, exc)
+                    continue
 
-            metaTile = MetaTile(weight=weight, type="image", json_filename=json_path, resource_filename=png_path, width=width, height=height)
-            meta_tiles.append(metaTile)
+            meta_tiles.append(MetaTile(weight=weight, type=TileImage.TYPE, json_filename=json_path,
+                                       resource_filename=image_path, width=width, height=height))
 
         if not meta_tiles:
-            logging.error("No valid assets loaded. A black screen will be displayed.")
-
-        logging.info(f"Loaded {len(meta_tiles)} assets from '{path_to_images}'.")
+            logger.warning("No images found in '%s'.", path)
+        logger.info("Loaded %d images from '%s'.", len(meta_tiles), path)
         media_cache.save_cache()
         return meta_tiles
 
@@ -108,10 +123,13 @@ class TileImage(Tile):
     slot in the layout but draws nothing.
     """
 
-    def __init__(self, meta_tile: MetaTile, x: float, h: int, asset_loader: AssetLoader):
+    TYPE = "image"
+    SCANNER = TileImageScanner
+
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, ctx: TileContext):
         self._masking_enabled = False
-        super().__init__(meta_tile=meta_tile, x=x, h=h)
-        self._asset_loader = asset_loader
+        super().__init__(meta_tile, x, h, ctx)
+        self._asset_loader = ctx.asset_loader
         self._pixmap: Optional[QPixmap] = None
         self._removed = False
         self._request_pixmap()

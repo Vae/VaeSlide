@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 PURGE_TIMEOUT = 15 * 60  # 15 minutes
 
 
-class ResourceLoader:
+class ImageCache:
     """
     Loads full-resolution images from disk and caches them.
 
@@ -20,7 +20,7 @@ class ResourceLoader:
     """
 
     def __init__(self):
-        logger.debug("ResourceLoader initialized.")
+        logger.debug("ImageCache initialized.")
         self._lock = threading.Lock()
         self._loaded_images: Dict[str, Tuple[QImage, float]] = {}  # path -> (image, last access)
 

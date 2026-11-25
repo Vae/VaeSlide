@@ -1,10 +1,13 @@
 import copy
+import functools
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 DEFAULT_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "..", "settings.json")
 
@@ -180,3 +183,28 @@ def get_settings() -> Settings:
     if _instance is None:
         _instance = Settings()
     return _instance
+
+
+# ----------------------------------------------------------------------
+# Cached per-module config
+# ----------------------------------------------------------------------
+_config_caches: list = []
+
+
+def section_config(fn: Callable[[], T]) -> Callable[[], T]:
+    """
+    Decorator for a module's config accessor, e.g. `maze_config()`.
+
+    The accessor reads and validates its settings section into a frozen
+    dataclass. The decorator runs it once and returns the cached result after
+    that. reset_config_caches() clears every cache made by this decorator.
+    """
+    cached = functools.cache(fn)
+    _config_caches.append(cached)
+    return cached
+
+
+def reset_config_caches() -> None:
+    """Forget every cached config so the next access re-reads the settings (tests, reloads)."""
+    for cached in _config_caches:
+        cached.cache_clear()

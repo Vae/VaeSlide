@@ -1,7 +1,10 @@
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar, Optional
 
 from PySide6.QtGui import QPainter
+
+if TYPE_CHECKING:
+    from src.AssetLoader import AssetLoader
 
 
 @dataclass
@@ -22,12 +25,26 @@ class MetaTile:
     json_filename: str
 
 
+@dataclass(frozen=True)
+class TileContext:
+    """Shared services handed to every tile constructor by its strip."""
+    asset_loader: Optional["AssetLoader"] = None  # background image loading (TileImage)
+
+
 class Tile:
-    """A single image tile being scrolled across the screen."""
+    """
+    A single tile being scrolled across the screen.
+
+    Subclasses set TYPE (the MetaTile.type they handle) and SCANNER (their
+    AssetScanner class), and are listed in src/TileTypes.py.
+    """
+    TYPE: ClassVar[str] = ""
+    SCANNER: ClassVar[Optional[type]] = None  # AssetScanner subclass that builds this type's MetaTiles
+
     x: float  # left-edge position in pixels (can be fractional)
     meta_tile: MetaTile  # just in case
 
-    def __init__(self, x: float, h: int, meta_tile: MetaTile):
+    def __init__(self, meta_tile: MetaTile, x: float, h: int, ctx: TileContext):
         self.x = x
         self.meta_tile = meta_tile
         self._height = h

@@ -6,3 +6,6 @@ dist
 .media_cache.json
 assets
 *.log
+
+__pycache__/
+.pytest_cache/
