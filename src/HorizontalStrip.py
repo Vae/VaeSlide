@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from PySide6.QtGui import QPainter
 
+from src import Transitions
 from src.AssetPicker import AssetPicker
 from src.Settings import get_settings, section_config
 from src.Tile import MetaTile, Tile, TileContext
@@ -121,7 +122,7 @@ class HorizontalStrip:
         kept = []
         for tile in self._tiles:
             if tile.right <= left_limit or tile.x >= right_limit:
-                tile.removed()
+                Transitions.release(tile)
             else:
                 kept.append(tile)
         self._tiles = kept
@@ -150,8 +151,11 @@ class HorizontalStrip:
         self._width = width
         self._height = height
 
-        # Pending replacements were requested at the old height; drop them
+        # Pending replacements were requested at the old height; drop them.
+        # Running transitions hold tiles at the old height too, so end them.
         self.swapper.cancel_all()
+        for tile in self._tiles:
+            Transitions.finish(tile)
 
         if not self._tiles:
             self.cull_and_fill()
@@ -181,6 +185,9 @@ class HorizontalStrip:
         for tile in self._tiles:
             tile.tick(now, tile.right > 0 and tile.x < self._width)
         self.swapper.update(self._tiles, self._width, now)
+        for tile in self._tiles:
+            if tile.transition is not None and tile.transition.update(now):
+                Transitions.finish(tile)
 
     def hit_test(self, x: float, y: float) -> Optional[Tile]:
         """Check if the given (x, y) coordinates are within any tile in this layout."""
@@ -191,10 +198,10 @@ class HorizontalStrip:
 
     def draw(self, painter: QPainter) -> None:
         for tile in self._tiles:
-            tile.draw(painter)
+            Transitions.draw_tile(painter, tile)
 
     def removed(self):
         for tile in self._tiles:
-            tile.removed()
+            Transitions.release(tile)
         self._tiles = []
         self.swapper.cancel_all()

@@ -5,6 +5,7 @@ from PySide6.QtGui import QPainter
 
 if TYPE_CHECKING:
     from src.AssetLoader import AssetLoader
+    from src.Transitions import ActiveTransition
 
 
 @dataclass(eq=False)  # compared and hashed by identity, so it can key per-strip weight tables
@@ -52,6 +53,8 @@ class Tile:
         self.swap_after: float | None = None
         # Set when the tile's asset could not be loaded; it will never become ready
         self.load_failed = False
+        # Set while this tile is transitioning in over the tile it replaced (src/Transitions.py)
+        self.transition: Optional["ActiveTransition"] = None
 
     def describe(self) -> str:
         """One-line description, logged when the tile is left-clicked."""

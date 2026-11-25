@@ -28,5 +28,10 @@
     "solve": true,
     "hold seconds": 5,
     "flash seconds": 3
+  },
+  "tile transition": {
+    "type": "random",
+    "seconds": 1.0,
+    "star points": 9
   }
 }

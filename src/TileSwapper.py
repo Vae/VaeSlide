@@ -7,6 +7,7 @@ import logging
 import random
 from typing import Callable, Dict, List, Optional
 
+from src import Transitions
 from src.AssetPicker import AssetPicker
 from src.Tile import MetaTile, Tile
 
@@ -48,7 +49,7 @@ class TileSwapper:
         Once per frame. `tiles` is the strip's list; finished swaps replace
         entries in it in place.
         """
-        self._complete_pending(tiles)
+        self._complete_pending(tiles, now)
         for tile in tiles:
             if tile not in self.pending and self._is_due(tile, screen_width, now):
                 self._request_swap(tile)
@@ -97,8 +98,8 @@ class TileSwapper:
         if new_tile is not None:
             self.pending[tile] = new_tile
 
-    def _complete_pending(self, tiles: List[Tile]) -> None:
-        """Put replacement tiles in place once their assets have loaded."""
+    def _complete_pending(self, tiles: List[Tile], now: float) -> None:
+        """Put replacement tiles in place once their assets have loaded, starting a transition."""
         if not self.pending:
             return
         index_of = {id(t): i for i, t in enumerate(tiles)}
@@ -115,7 +116,8 @@ class TileSwapper:
                 continue
             new_tile.x = old_tile.x  # the old tile kept scrolling while we waited
             new_tile.visible_since = None  # next frame starts its clock with a fresh random delay
-            old_tile.removed()
+            # The new tile takes the slot now; the old one stays alive until the transition ends
+            Transitions.begin(new_tile, old_tile, now)
             tiles[i] = new_tile
             del self.pending[old_tile]
             logger.debug("Swapped tile %s -> %s",
