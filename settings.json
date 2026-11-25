@@ -29,6 +29,18 @@
     "hold seconds": 5,
     "flash seconds": 3
   },
+  "tile 3d pipes": {
+    "count": 600,
+    "weight": 10000.0,
+    "grid size": [16, 10, 10],
+    "speed": 12,
+    "turn chance": 0.25,
+    "pipe radius": 0.18,
+    "pipes per cycle": 8,
+    "fill": 0.35,
+    "hold seconds": 3,
+    "color mode": "per pipe"
+  },
   "tile transition": {
     "type": "random",
     "seconds": 1.0,

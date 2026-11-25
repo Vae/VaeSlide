@@ -120,6 +120,20 @@ class Settings(SettingsSection):
             "hold seconds": 5,   # minimum time a finished maze is shown before it may be swapped
             "flash seconds": 3,  # after solving, flash the solution this long; no swap until it ends
         },
+        # Settings for 3D pipes tiles (Tile3DPipes). These tiles never swap;
+        # each one clears and starts over with new colors when a cycle is done.
+        "tile 3d pipes": {
+            "count": 2,              # entries in the selection pool; 0 = none
+            "weight": 1.0,           # selection weight of each entry
+            "grid size": [16, 10, 10],  # [x, y, z] cells (2..40 each); x:y sets the tile's shape
+            "speed": 12,             # cells grown per second
+            "turn chance": 0.25,     # chance per step that a pipe turns even when it could go straight
+            "pipe radius": 0.18,     # pipe radius as a fraction of a cell (0.05..0.45)
+            "pipes per cycle": 8,    # pipes drawn before the tile clears and starts over
+            "fill": 0.35,            # ...or once this fraction of the grid is filled (0.05..1)
+            "hold seconds": 3,       # finished picture stays this long before clearing
+            "color mode": "per pipe",  # "per pipe" or "per cycle" (one color for the whole picture)
+        },
         # How a swapped tile changes to its new asset (src/Transitions.py)
         "tile transition": {
             # "random" (a different pick each swap), "none", or one of: fade, star swipe, zoom, spin, mask

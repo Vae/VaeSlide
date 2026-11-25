@@ -132,7 +132,7 @@ def test_missing_folder_returns_empty_list(tmp_path, media_cache, scanner):
 # Registry
 # ----------------------------------------------------------------------
 def test_registry_entries_are_consistent():
-    assert set(TILE_TYPES) == {"image", "video", "maze"}
+    assert set(TILE_TYPES) == {"image", "video", "maze", "3d pipes"}
     for name, cls in TILE_TYPES.items():
         assert cls.TYPE == name
         assert issubclass(cls.SCANNER, AssetScanner)

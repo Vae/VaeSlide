@@ -28,7 +28,7 @@ def test_ticks_fill_every_layer(widget):
     widget.grab()  # paints once through paintEvent
     for layer in widget._layers:
         tiles = layer.layout.tiles
-        assert tiles and all(t.meta_tile.type == "maze" for t in tiles)
+        assert tiles and all(t.meta_tile.type in ("maze", "3d pipes") for t in tiles)
     # Layers overlap by their configured fraction of the screen height
     back, front = widget._layers
     assert front.y < back.y + back.height

@@ -12,8 +12,9 @@ from src.Tile import MetaTile, Tile, TileContext
 from src.TileImage import TileImage
 from src.TileMaze import TileMaze
 from src.TileVideo import TileVideo
+from src.Tile3DPipes import Tile3DPipes
 
-TILE_TYPES: Dict[str, Type[Tile]] = {cls.TYPE: cls for cls in (TileImage, TileVideo, TileMaze)}
+TILE_TYPES: Dict[str, Type[Tile]] = {cls.TYPE: cls for cls in (TileImage, TileVideo, TileMaze, Tile3DPipes)}
 
 
 def create_tile(meta_tile: MetaTile, x: float, h: int, ctx: TileContext) -> Optional[Tile]:
