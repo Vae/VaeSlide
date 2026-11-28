@@ -25,7 +25,7 @@ from PySide6.QtGui import QPainter, QColor, QSurfaceFormat, QOffscreenSurface, Q
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from src import Diagnostics, GLSupport
+from src import Diagnostics, GLSupport, TileShaders, Transitions
 from src.AssetLoader import AssetLoader
 from src.AssetScanner import read_asset_sources
 from src.FrameClock import FrameClock, REFERENCE_FPS
@@ -392,6 +392,9 @@ class GLEndlessScrollWidget(ScrollWidgetMixin, QOpenGLWidget):
         logger.info("OpenGL renderer: %s | %s | %s",
                     functions.glGetString(GL_VENDOR), functions.glGetString(GL_RENDERER),
                     functions.glGetString(GL_VERSION))
+        # Compile now rather than on first use: no hitch the first time an effect
+        # shows, and a broken shader is reported at launch
+        GLSupport.precompile(Transitions.shader_programs() + TileShaders.shader_programs())
 
     def paintGL(self) -> None:  # noqa: N802
         GLSupport.collect_garbage()  # GL objects released since the last frame (context is current now)

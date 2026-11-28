@@ -14,8 +14,9 @@ Shaders only run on the OpenGL renderer. Everywhere else (the raster
 renderer, the offscreen test platform, a shader that fails to compile, or
 "tile shaders" -> "enabled": false) the tile is drawn plainly.
 
-To add a shader: subclass TileShader, set NAME, write FRAGMENT (defines
-`vec4 shade(vec2 uv)` returning a premultiplied colour), add a config
+To add a shader: subclass TileShader, set NAME, write its GLSL file in
+src/shaders/tile/ and name it in SHADER (it defines `vec4 shade(vec2 uv)`
+returning a premultiplied colour; see tile/inputs.glsl), add a config
 dataclass with `enabled` and `chance` and a read_config() for it, override
 tick()/active()/set_uniforms() as needed, and add the class to
 TILE_SHADERS. Its settings go in "tile shaders" -> NAME.
@@ -25,7 +26,7 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -53,18 +54,20 @@ class TileShader:
     One effect on one tile. Instances are made per tile, so they may keep
     random per-tile state and animation clocks.
 
-    The fragment shader gets:
+    SHADER is its GLSL file under src/shaders (e.g. "tile/water_drop.glsl"),
+    which defines `vec4 shade(vec2 uv)`. It comes after tile/inputs.glsl:
 
         vec2 uv;                // 0..1 across the tile, (0, 0) at the top left
         uniform sampler2D tile; // the tile so far (unit 0); sample with tile_uv(uv)
         uniform vec2 size;      // the texture's size in device pixels
     """
     NAME: ClassVar[str] = ""
-    FRAGMENT: ClassVar[str] = ""
-    PREAMBLE: ClassVar[str] = """
-uniform sampler2D tile;
-uniform vec2 size;
-"""
+    SHADER: ClassVar[str] = ""
+    INPUTS: ClassVar[str] = "tile/inputs.glsl"
+
+    @classmethod
+    def program_spec(cls) -> GLSupport.ProgramSpec:
+        return f"tile shader {cls.NAME}", (cls.INPUTS, cls.SHADER)
 
     def __init__(self, config: Any, rng: random.Random):
         self.config = config
@@ -103,20 +106,7 @@ class HueRotateConfig:
 class HueRotateShader(TileShader):
     """Turns every colour's hue around the colour wheel, slowly, or by a fixed random amount at speed 0."""
     NAME = "hue rotate"
-    # Rotates the colour about the grey axis (Rodrigues' formula), which keeps
-    # greys grey and brightness roughly the same.
-    FRAGMENT = """
-uniform float angle;  // radians
-vec4 shade(vec2 p) {
-    vec4 c = texture(tile, tile_uv(p));
-    if (c.a <= 0.0) return c;
-    vec3 rgb = c.rgb / c.a;
-    const vec3 k = vec3(0.57735027);
-    float s = sin(angle), co = cos(angle);
-    rgb = rgb * co + cross(k, rgb) * s + k * dot(k, rgb) * (1.0 - co);
-    return vec4(clamp(rgb, 0.0, 1.0) * c.a, c.a);
-}
-"""
+    SHADER = "tile/hue_rotate.glsl"
 
     def __init__(self, config: HueRotateConfig, rng: random.Random):
         super().__init__(config, rng)
@@ -158,37 +148,7 @@ class WaterDropShader(TileShader):
     point, bending the image and catching the light, and die away.
     """
     NAME = "water drop"
-    # A ring wave train: the front moves out from the centre, the waves behind
-    # it decay, and the whole thing fades out so it ends exactly on the plain image.
-    FRAGMENT = """
-uniform float t;          // 0..1 through the effect
-uniform vec2 centre;      // where the drop lands, 0..1 across the tile
-uniform float strength;   // max displacement, fraction of the height
-uniform float wavelength; // fraction of the height
-vec4 shade(vec2 p) {
-    vec2 px = p * size;
-    vec2 c = centre * size;
-    vec2 d = px - c;
-    float dist = length(d);
-    float lambda = max(1.0, wavelength * size.y);
-    float reach = length(max(c, size - c));  // distance to the farthest corner
-    float front = t * (reach + 3.0 * lambda);
-    float x = dist - front;  // > 0 ahead of the front, < 0 behind it
-    float envelope = x > 0.0 ? exp(-x * x / (0.1 * lambda * lambda)) : exp(x / (1.5 * lambda));
-    // Ripples flatten as the ring grows (like real ones, ~1/sqrt(radius)), and
-    // fade out over the last part so the effect ends exactly on the plain image
-    float amount = smoothstep(0.0, 0.04, t) * (1.0 - smoothstep(0.6, 1.0, t))
-                 * inversesqrt(1.0 + front / (4.0 * lambda));
-    float phase = 6.2831853 * x / lambda;
-    float wave = sin(phase) * envelope * amount;
-    float slope = cos(phase) * envelope * amount;
-    vec2 dir = dist > 0.0 ? d / dist : vec2(0.0);
-    vec2 offset = dir * wave * strength * size.y;
-    vec4 col = texture(tile, tile_uv(clamp((px - offset) / size, vec2(0.0), vec2(1.0))));
-    float light = 1.0 + 0.35 * slope;  // wave faces towards the light get brighter
-    return vec4(min(col.rgb * light, vec3(col.a)), col.a);
-}
-"""
+    SHADER = "tile/water_drop.glsl"
 
     def __init__(self, config: WaterDropConfig, rng: random.Random):
         super().__init__(config, rng)
@@ -269,6 +229,14 @@ def assign(tile: "Tile", rng: Optional[random.Random] = None) -> None:
             tile.shaders.append(cls(shader_cfg, rng))
 
 
+def shader_programs() -> List[GLSupport.ProgramSpec]:
+    """The programs of the tile shaders that are switched on, for precompiling."""
+    cfg = shaders_config()
+    if not cfg.enabled:
+        return []
+    return [cls.program_spec() for name, cls in TILE_SHADERS.items() if cfg.shaders[name].enabled]
+
+
 def tick(tile: "Tile", now: float, centre_on_screen: bool) -> None:
     for shader in tile.shaders:
         shader.tick(tile, now, centre_on_screen)
@@ -297,7 +265,7 @@ def draw(painter: QPainter, tile: "Tile") -> None:
 def _draw_gl(painter: QPainter, tile: "Tile", shaders: list) -> bool:
     passes = []
     for shader in shaders:
-        program = GLSupport.shader_program(f"tile shader {shader.NAME}", shader.PREAMBLE + shader.FRAGMENT)
+        program = GLSupport.shader_program(*shader.program_spec())
         if program is not None:
             passes.append((shader, program))
     if not passes:

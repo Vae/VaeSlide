@@ -9,14 +9,17 @@ test platform, a driver that fails to compile a shader).
 A shader draw goes:
 
     state = PaintState.of(painter, rect)      # transform, opacity, clip: before QPainter steps aside
-    program = shader_program(name, source)    # compiled once per context
+    program = shader_program(name, files)     # built once per context, rebuilt when its files change
     with native_painting(painter) as gl:      # QPainter hands GL over to us
         target.render(gl, tile.draw, rect, state.scale)  # draw a tile into a texture (FBO)
         draw_quad(gl, program, state, (target.texture_id,), set_uniforms)  # run the shader over the rect
 
-Fragment shaders define `vec4 shade(vec2 uv)` returning a premultiplied
-colour; FRAGMENT_HEADER comes before it and FRAGMENT_MAIN after it.
-FRAGMENT_MAIN applies the painter's opacity and clip, so a shader quad
+The GLSL is in src/shaders: common/ holds the vertex shader and the start
+(header.glsl) and end (main.glsl) of every fragment shader; tile/ and
+transition/ hold the effects. A fragment shader is header.glsl + the
+effect's files (its kind's inputs.glsl, then its own file, which defines
+`vec4 shade(vec2 uv)` returning a premultiplied colour) + main.glsl.
+main.glsl applies the painter's opacity and clip, so a shader quad
 behaves like any QPainter drawing: it follows the painter's transform
 (even a perspective one), fades with its opacity and respects its clip.
 
@@ -32,6 +35,9 @@ calls collect_garbage() at the start of every paintGL.
 import contextlib
 import logging
 import math
+import os
+import re
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -62,49 +68,19 @@ SCALE_STEPS = 8         # tile textures are rendered at scales rounded up to 1/S
 CLIP_GRANULARITY = 128  # px; clip masks are rounded up to multiples of this (a growing clip reuses its buffer)
 CLIP_UNIT = 7           # texture unit of the clip coverage mask; shaders use units below it
 
-# Every shader quad uses this vertex shader: a triangle strip of 4 vertices
-# generated from gl_VertexID, so no vertex buffer is needed. The quad is
-# `rect` (x, y, w, h) in painter coordinates, mapped to device pixels by
-# `transform` (the painter's device transform, possibly a perspective one)
-# and from there to clip space. w = d.z keeps texturing perspective-correct.
-VERTEX_SHADER = """
-#version 330
-uniform vec4 rect;
-uniform mat3 transform;
-uniform vec2 target;
-out vec2 uv;
-void main() {
-    vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1);  // (0,0) (1,0) (0,1) (1,1)
-    uv = corner;                                             // (0, 0) at the rect's top left
-    vec3 d = transform * vec3(rect.xy + corner * rect.zw, 1.0);
-    vec2 ndc = vec2(2.0 * d.x / d.z / target.x - 1.0, 1.0 - 2.0 * d.y / d.z / target.y);
-    gl_Position = vec4(ndc * d.z, 0.0, d.z);
-}
-"""
-
-FRAGMENT_HEADER = """#version 330
-in vec2 uv;
-out vec4 color;
-// Textures rendered by TileTarget are upside down (GL's origin is bottom left)
-vec2 tile_uv(vec2 p) { return vec2(p.x, 1.0 - p.y); }
-"""
-
-FRAGMENT_MAIN = """
-uniform float opacity;
-uniform bool clipped;
-uniform sampler2D clip_mask;
-uniform vec4 clip_box;  // device px: x, y, w, h of clip_mask
-uniform vec2 target;
-void main() {
-    float coverage = 1.0;
-    if (clipped) {
-        vec2 p = (vec2(gl_FragCoord.x, target.y - gl_FragCoord.y) - clip_box.xy) / clip_box.zw;
-        coverage = (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, vec2(1.0))))
-                 ? 0.0 : texture(clip_mask, tile_uv(p)).a;
-    }
-    color = shade(uv) * (opacity * coverage);
-}
-"""
+# GLSL lives in src/shaders. Paths given to shader_program() are relative to it
+# (an absolute path works too, e.g. a test's temporary file).
+SHADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shaders")
+GLSL_VERSION = "#version 330"
+# Every shader quad uses this vertex shader; fragment shaders are HEADER + the
+# shader's own files + MAIN (which calls their `vec4 shade(vec2 uv)`).
+VERTEX_FILE = "common/quad.vert"
+HEADER_FILE = "common/header.glsl"
+MAIN_FILE = "common/main.glsl"
+# Each file in a composed shader gets this source-string number plus its index
+# in `#line`, so driver errors can be mapped back to file:line (see _readable_log)
+SOURCE_NUMBER_BASE = 100
+RELOAD_SECONDS = 1.0  # how often a program checks whether its files changed
 
 
 def is_gl_painter(painter: QPainter) -> bool:
@@ -120,7 +96,7 @@ def is_gl_painter(painter: QPainter) -> bool:
 class _ContextState:
     def __init__(self, context: QOpenGLContext):
         self.context = context  # keeps the Python wrapper alive while we cache things for it
-        self.programs: Dict[str, Optional[QOpenGLShaderProgram]] = {}  # None: failed to build, don't retry
+        self.programs: Dict[str, "_Program"] = {}  # by name; see shader_program
         self.uniforms: Dict[Tuple[int, str], int] = {}  # (id(program), name) -> location
         self.vao: Optional[QOpenGLVertexArrayObject] = None
         self.clip_target: Optional["TileTarget"] = None  # reused for every clipped quad
@@ -183,25 +159,146 @@ def pending_garbage() -> int:
     return len(_garbage)
 
 
-def shader_program(name: str, shade_source: str) -> Optional[QOpenGLShaderProgram]:
+# ----------------------------------------------------------------------
+# Shader programs: composed from files, compiled once, rebuilt when edited
+# ----------------------------------------------------------------------
+ProgramSpec = Tuple[str, Tuple[str, ...]]  # (name, fragment files between HEADER_FILE and MAIN_FILE)
+
+
+@dataclass
+class _Program:
+    program: Optional[QOpenGLShaderProgram]  # None: never built successfully
+    signature: tuple  # the files' (mtime, size) when last built (or tried)
+    checked: float    # time.monotonic() of the last check for changes
+
+
+def shader_path(name: str) -> str:
+    return os.path.normpath(os.path.join(SHADER_DIR, name))
+
+
+def _display_path(name: str) -> str:
+    """How a shader file is named in log messages: relative to the repo when it's ours."""
+    path = shader_path(name)
+    repo = os.path.dirname(os.path.dirname(SHADER_DIR))
+    if os.path.normcase(path).startswith(os.path.normcase(repo) + os.sep):
+        path = os.path.relpath(path, repo)
+    return path.replace("\\", "/")
+
+
+def _signature(files: Tuple[str, ...]) -> tuple:
+    result = []
+    for name in files:
+        try:
+            info = os.stat(shader_path(name))
+            result.append((info.st_mtime_ns, info.st_size))
+        except OSError:
+            result.append(None)
+    return tuple(result)
+
+
+def compose_source(files: Tuple[str, ...]) -> str:
     """
-    The program for VERTEX_SHADER and a fragment shader made of
-    FRAGMENT_HEADER + `shade_source` (which defines `vec4 shade(vec2 uv)`) +
-    FRAGMENT_MAIN. Compiled once per context and cached under `name`. Returns
-    None (and logs once) when it doesn't build, so callers can fall back.
+    One shader's source from several files, in order. The files' own #version
+    lines (there for editors) are blanked and one goes first; each file starts
+    with `#line 1 <SOURCE_NUMBER_BASE + index>`, so compile errors say which
+    file and line they're from. Raises OSError for a missing file.
+    """
+    parts = [GLSL_VERSION]
+    for index, name in enumerate(files):
+        with open(shader_path(name), encoding="utf-8") as f:
+            text = f.read()
+        lines = ["" if line.lstrip().startswith("#version") else line for line in text.splitlines()]
+        parts.append(f"#line 1 {SOURCE_NUMBER_BASE + index}")
+        parts.extend(lines)
+    return "\n".join(parts) + "\n"
+
+
+# A source-string number and a line, in the formats drivers use:
+# NVIDIA "101(12) : error", Mesa "101:12(5): error", AMD/Intel "ERROR: 101:12: ..."
+_LOCATION = re.compile(r"(?<![\w.])(\d{3})(?:\((\d+)\)|:(\d+))")
+
+
+def _readable_log(log: str, files: Tuple[str, ...]) -> str:
+    """Replace source-string numbers in a compile log with file:line."""
+    def replace(match: re.Match) -> str:
+        index = int(match.group(1)) - SOURCE_NUMBER_BASE
+        if not 0 <= index < len(files):
+            return match.group(0)
+        return f"{_display_path(files[index])}:{match.group(2) or match.group(3)}"
+    return _LOCATION.sub(replace, log)
+
+
+def _build(fragment_files: Tuple[str, ...]) -> Tuple[Optional[QOpenGLShaderProgram], str]:
+    """Compile and link; returns (program, "") or (None, error message)."""
+    vertex_files = (VERTEX_FILE,)
+    fragment_files = (HEADER_FILE,) + fragment_files + (MAIN_FILE,)
+    try:
+        vertex, fragment = compose_source(vertex_files), compose_source(fragment_files)
+    except OSError as exc:
+        return None, f"can't read {exc.filename}: {exc.strerror}"
+    program = QOpenGLShaderProgram()
+    if not program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex, vertex):
+        return None, _readable_log(program.log(), vertex_files)
+    if not program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, fragment):
+        return None, _readable_log(program.log(), fragment_files)
+    if not program.link():
+        return None, _readable_log(program.log(), fragment_files)
+    return program, ""
+
+
+def _drop_program(state: _ContextState, program: Optional[QOpenGLShaderProgram]) -> None:
+    """Forget a replaced program's uniform locations (a new program could reuse its id())."""
+    if program is not None:
+        stale = [key for key in state.uniforms if key[0] == id(program)]
+        for key in stale:
+            del state.uniforms[key]
+
+
+def shader_program(name: str, files: Tuple[str, ...]) -> Optional[QOpenGLShaderProgram]:
+    """
+    The program for VERTEX_FILE and a fragment shader made of HEADER_FILE +
+    `files` (paths under src/shaders; together they define
+    `vec4 shade(vec2 uv)`) + MAIN_FILE. Built once per context and cached
+    under `name`.
+
+    Every RELOAD_SECONDS it checks whether any of its files changed and, if
+    so, rebuilds. A rebuild that fails is logged and the previous program is
+    kept, so a typo while editing doesn't knock the effect out. Returns None
+    (logged once) when it has never built, so callers can fall back.
     """
     state = _state()
-    if name not in state.programs:
-        program = QOpenGLShaderProgram()
-        ok = (program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex, VERTEX_SHADER)
-              and program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment,
-                                                  FRAGMENT_HEADER + shade_source + FRAGMENT_MAIN)
-              and program.link())
-        if not ok:
-            logger.error("Shader %r failed to build; using the QPainter fallback.\n%s", name, program.log())
-            program = None
-        state.programs[name] = program
-    return state.programs[name]
+    entry = state.programs.get(name)
+    now = time.monotonic()
+    if entry is not None and now - entry.checked < RELOAD_SECONDS:
+        return entry.program
+    all_files = (VERTEX_FILE, HEADER_FILE) + tuple(files) + (MAIN_FILE,)
+    signature = _signature(all_files)
+    if entry is not None:
+        entry.checked = now
+        if signature == entry.signature:
+            return entry.program
+
+    program, error = _build(tuple(files))
+    if program is not None:
+        if entry is not None:
+            logger.info("Shader %r reloaded.", name)
+            _drop_program(state, entry.program)
+        state.programs[name] = _Program(program, signature, now)
+    elif entry is not None and entry.program is not None:
+        logger.error("Shader %r failed to rebuild; keeping the previous version.\n%s", name, error)
+        entry.signature = signature
+    else:
+        logger.error("Shader %r failed to build; using the QPainter fallback.\n%s", name, error)
+        state.programs[name] = _Program(None, signature, now)
+    return state.programs[name].program
+
+
+def precompile(specs: List[ProgramSpec]) -> int:
+    """Build every program in `specs` now (call with the context current); returns how many built."""
+    start = time.perf_counter()
+    built = sum(shader_program(name, files) is not None for name, files in specs)
+    logger.info("Compiled %d of %d shaders in %.0f ms.", built, len(specs), 1000 * (time.perf_counter() - start))
+    return built
 
 
 def set_uniform(program: QOpenGLShaderProgram, name: str, *values: float) -> None:

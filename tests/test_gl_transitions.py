@@ -92,10 +92,13 @@ def test_shader_is_used_and_stays_inside_the_tile(gl, quad_type, monkeypatch):
     effect.release()
 
 
-def test_a_broken_shader_falls_back(gl, quad_type, caplog):
+def test_a_broken_shader_falls_back(gl, quad_type, caplog, tmp_path):
+    source = tmp_path / "broken.glsl"
+    source.write_text("vec4 shade(vec2 p) { this is not glsl }\n")
+
     class Broken(ShaderTransition):
         NAME = "broken"
-        FRAGMENT = "void main() { this is not glsl }"
+        SHADER = str(source)
 
     old, new = pair(quad_type)
     fell_back = []

@@ -15,7 +15,7 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Dict, Optional, Tuple, Type
+from typing import Callable, ClassVar, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -69,9 +69,10 @@ class ShaderTransition(Transition):
     OpenGL renderer, with a QPainter fallback (draw_fallback) everywhere else.
 
     The shader gets both tiles (drawn with their own tile shaders) as
-    textures. FRAGMENT defines `vec4 shade(vec2 uv)`, returning the blended,
-    premultiplied colour (see GLSupport for what comes before and after it).
-    Available inputs:
+    textures. SHADER is its GLSL file under src/shaders (e.g.
+    "transition/mask.glsl"), which defines `vec4 shade(vec2 uv)`, returning
+    the blended, premultiplied colour (see GLSupport for what comes before
+    and after it). It comes after transition/inputs.glsl:
 
         vec2 uv;                    // 0..1 across the tile, (0, 0) at the top left
         uniform sampler2D old_tile; // unit 0; sample with tile_uv(uv)
@@ -84,13 +85,12 @@ class ShaderTransition(Transition):
     extra_textures(). The "tile transition" -> "use shaders" setting turns
     the shader off, so draw_fallback is always used.
     """
-    FRAGMENT: ClassVar[str] = ""
-    PREAMBLE: ClassVar[str] = """
-uniform sampler2D old_tile;
-uniform sampler2D new_tile;
-uniform float progress;
-uniform vec2 size;
-"""
+    SHADER: ClassVar[str] = ""
+    INPUTS: ClassVar[str] = "transition/inputs.glsl"
+
+    @classmethod
+    def program_spec(cls) -> GLSupport.ProgramSpec:
+        return f"transition {cls.NAME}", (cls.INPUTS, cls.SHADER)
 
     def __init__(self):
         self._targets = None  # (old TileTarget, new TileTarget), made on the first GL draw
@@ -116,7 +116,7 @@ uniform vec2 size;
         state = GLSupport.PaintState.of(painter, rect)
         if not state.visible():
             return True  # nothing to draw
-        program = GLSupport.shader_program(type(self).__name__, self.PREAMBLE + self.FRAGMENT)
+        program = GLSupport.shader_program(*self.program_spec())
         if program is None:
             return False
         if self._targets is None:
@@ -378,17 +378,7 @@ class MaskTransition(ShaderTransition):
     # keeps large tiles cheap.
     MAX_MASK_SIZE = 320
 
-    # Same formula as alpha(), per pixel
-    FRAGMENT = """
-uniform sampler2D mask;
-uniform float softness;
-vec4 shade(vec2 p) {
-    float m = texture(mask, p).r;
-    float a = softness <= 0.0 ? float(m < progress)
-                              : clamp((progress * (1.0 + softness) - m) / softness, 0.0, 1.0);
-    return mix(texture(old_tile, tile_uv(p)), texture(new_tile, tile_uv(p)), a);
-}
-"""
+    SHADER = "transition/mask.glsl"  # same formula as alpha(), per pixel
 
     def __init__(self, shape: Optional[str] = None, softness: Optional[float] = None,
                  rng: Optional[random.Random] = None):
@@ -509,6 +499,15 @@ def transition_config() -> TransitionConfig:
         mask_softness=min(1.0, max(0.0, section.get_number("mask softness"))),
         use_shaders=bool(section.get("use shaders", True)),
     )
+
+
+def shader_programs() -> List[GLSupport.ProgramSpec]:
+    """The programs of the shader transitions that can be picked, for precompiling."""
+    cfg = transition_config()
+    if not cfg.use_shaders or cfg.type == "none" or cfg.seconds <= 0:
+        return []
+    kinds = TRANSITIONS.values() if cfg.type == "random" else [TRANSITIONS[cfg.type]]
+    return [cls.program_spec() for cls in kinds if issubclass(cls, ShaderTransition)]
 
 
 def new_transition() -> Optional[Transition]:

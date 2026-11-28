@@ -15,8 +15,15 @@ from PySide6 import QtCore
 _crash_log = None
 
 
+# Qt's shader compile warnings repeat the error with the whole composed source.
+# GLSupport.shader_program logs the same error mapped to file:line, so these are dropped.
+_QT_DUPLICATES = ("QOpenGLShader::compile", "*** Problematic", "QOpenGLShaderProgram::link")
+
+
 def _qt_handler(mode, ctx, msg):
     """Route Qt's own warnings (which often precede a crash) into the log."""
+    if msg.startswith(_QT_DUPLICATES):
+        return
     logging.warning("Qt[%s] %s (%s:%s)", mode.name, msg, ctx.file, ctx.line)
 
 
