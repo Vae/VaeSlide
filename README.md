@@ -24,6 +24,5 @@ Basically it's a scrolling screensaver implemented in Python using PySide6.
 - AI Image generation for automated tile generation
 - Support for multiple monitors with independent scrolling
 - Ability to disable scrolling and compose a static scene
-
 # Optimizations
 - Investigate PySide6's built-in caching for images and other resources
