@@ -1,10 +1,13 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Optional
+from typing import TYPE_CHECKING, ClassVar, List, Optional
 
 from PySide6.QtGui import QPainter
 
+from src import TileShaders
+
 if TYPE_CHECKING:
     from src.AssetLoader import AssetLoader
+    from src.TileShaders import TileShader
     from src.Transitions import ActiveTransition
 
 
@@ -55,6 +58,8 @@ class Tile:
         self.load_failed = False
         # Set while this tile is transitioning in over the tile it replaced (src/Transitions.py)
         self.transition: Optional["ActiveTransition"] = None
+        # GPU effects drawn over this tile, in order (src/TileShaders.py); assigned by the strip
+        self.shaders: List["TileShader"] = []
 
     def describe(self) -> str:
         """One-line description, logged when the tile is left-clicked."""
@@ -103,7 +108,21 @@ class Tile:
         return True
 
     def draw(self, painter: QPainter):
+        """Draw the tile's own content. Subclasses override this; everyone else calls paint()."""
         pass
+
+    def content_key(self) -> object:
+        """
+        A value that changes whenever draw() would draw different pixels
+        (apart from moving with x). Shaders keep the tile's texture while it
+        stays the same instead of redrawing it every frame. None (the
+        default) means "unknown": the texture is redrawn every frame.
+        """
+        return None
+
+    def paint(self, painter: QPainter) -> None:
+        """Draw the tile with its shader effects (plain draw() when it has none or GL is off)."""
+        TileShaders.draw(painter, self)
 
     def hit_test(self, x: float, y: float) -> bool:
         """Check if the given (x, y) coordinates are within the tile."""

@@ -21,7 +21,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPolygonF, QTransform
 
-from src import GLSupport
+from src import GLSupport, TileShaders
 from src.Settings import get_settings, section_config
 from src.Tile import Tile
 
@@ -68,36 +68,36 @@ class ShaderTransition(Transition):
     A transition computed by a GLSL fragment shader when painting on the
     OpenGL renderer, with a QPainter fallback (draw_fallback) everywhere else.
 
-    The shader gets both tiles as textures and writes the blended,
-    premultiplied colour. Available inputs:
+    The shader gets both tiles (drawn with their own tile shaders) as
+    textures. FRAGMENT defines `vec4 shade(vec2 uv)`, returning the blended,
+    premultiplied colour (see GLSupport for what comes before and after it).
+    Available inputs:
 
-        in vec2 uv;                 // 0..1 across the tile, (0, 0) at the top left
+        vec2 uv;                    // 0..1 across the tile, (0, 0) at the top left
         uniform sampler2D old_tile; // unit 0; sample with tile_uv(uv)
         uniform sampler2D new_tile; // unit 1; sample with tile_uv(uv)
         uniform float progress;     // 0..1
         uniform vec2 size;          // tile size in device pixels
         vec2 tile_uv(vec2 uv);      // flips uv for the tile textures (rendered upside down by GL)
 
-    FRAGMENT holds only the declarations and main() after that preamble.
     Extra uniforms and textures (units 2+) come from set_uniforms() /
-    extra_textures().
+    extra_textures(). The "tile transition" -> "use shaders" setting turns
+    the shader off, so draw_fallback is always used.
     """
     FRAGMENT: ClassVar[str] = ""
-    PREAMBLE: ClassVar[str] = """#version 330
-in vec2 uv;
-out vec4 color;
+    PREAMBLE: ClassVar[str] = """
 uniform sampler2D old_tile;
 uniform sampler2D new_tile;
 uniform float progress;
 uniform vec2 size;
-vec2 tile_uv(vec2 p) { return vec2(p.x, 1.0 - p.y); }
 """
 
     def __init__(self):
         self._targets = None  # (old TileTarget, new TileTarget), made on the first GL draw
 
     def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
-        if not (GLSupport.is_gl_painter(painter) and self._draw_gl(painter, old, new, progress)):
+        use_gl = transition_config().use_shaders and GLSupport.is_gl_painter(painter)
+        if not (use_gl and self._draw_gl(painter, old, new, progress)):
             self.draw_fallback(painter, old, new, progress)
 
     def draw_fallback(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
@@ -113,29 +113,30 @@ vec2 tile_uv(vec2 p) { return vec2(p.x, 1.0 - p.y); }
 
     def _draw_gl(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> bool:
         rect = tile_rect(new)
-        device_rect, scale, target = GLSupport.device_geometry(painter, rect)
-        if device_rect.width() < 1 or device_rect.height() < 1:
-            return True  # nothing visible to draw
+        state = GLSupport.PaintState.of(painter, rect)
+        if not state.visible():
+            return True  # nothing to draw
         program = GLSupport.shader_program(type(self).__name__, self.PREAMBLE + self.FRAGMENT)
         if program is None:
             return False
         if self._targets is None:
             self._targets = (GLSupport.TileTarget(), GLSupport.TileTarget())
         old_target, new_target = self._targets
-        device_size = (round(device_rect.width()), round(device_rect.height()))
+
+        def set_uniforms(p) -> None:
+            size = old_target.size
+            GLSupport.set_sampler(p, "old_tile", 0)
+            GLSupport.set_sampler(p, "new_tile", 1)
+            GLSupport.set_uniform(p, "progress", progress)
+            GLSupport.set_uniform(p, "size", size.width(), size.height())
+            self.set_uniforms(p, new, progress)
+
         with GLSupport.native_painting(painter) as gl:
-            old_target.render(gl, old, rect, scale)
-            new_target.render(gl, new, rect, scale)
+            old_target.render(gl, old.paint, rect, state.scale, key=TileShaders.paint_key(old))
+            new_target.render(gl, new.paint, rect, state.scale, key=TileShaders.paint_key(new))
             extra = self.extra_textures(new)
-            program.bind()
-            GLSupport.set_sampler(program, "old_tile", 0)
-            GLSupport.set_sampler(program, "new_tile", 1)
-            GLSupport.set_uniform(program, "progress", progress)
-            GLSupport.set_uniform(program, "size", *device_size)
-            self.set_uniforms(program, new, progress)
-            GLSupport.draw_quad(gl, program, device_rect, target,
-                                (old_target.texture_id, new_target.texture_id) + extra)
-            program.release()
+            GLSupport.draw_quad(gl, program, state, (old_target.texture_id, new_target.texture_id) + extra,
+                                set_uniforms)
         return True
 
     def release(self) -> None:
@@ -150,10 +151,10 @@ class FadeTransition(Transition):
     NAME = "fade"
 
     def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
-        old.draw(painter)
+        old.paint(painter)
         painter.save()
         painter.setOpacity(painter.opacity() * ease_in_out(progress))
-        new.draw(painter)
+        new.paint(painter)
         painter.restore()
 
 
@@ -189,7 +190,7 @@ class StarSwipeTransition(Transition):
         return path
 
     def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
-        old.draw(painter)
+        old.paint(painter)
         if progress <= 0.0:
             return
         rect = tile_rect(new)
@@ -198,7 +199,7 @@ class StarSwipeTransition(Transition):
         clip = clip.intersected(self.star_path(rect, progress))
         painter.save()
         painter.setClipPath(clip, Qt.ClipOperation.IntersectClip)
-        new.draw(painter)
+        new.paint(painter)
         painter.restore()
 
 
@@ -209,7 +210,7 @@ def _draw_scaled(painter: QPainter, tile: Tile, center: QPointF, scale: float, o
     painter.scale(scale, scale)
     painter.translate(-center)
     painter.setOpacity(painter.opacity() * opacity)
-    tile.draw(painter)
+    tile.paint(painter)
     painter.restore()
 
 
@@ -260,7 +261,7 @@ class SpinTransition(Transition):
         painter.save()
         painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)  # perspective may bulge past the rect
         painter.setTransform(turn, combine=True)
-        tile.draw(painter)
+        tile.paint(painter)
         shade = self.MAX_SHADE * abs(math.sin(math.radians(face_angle)))
         if shade > 0.0:
             painter.fillRect(rect, QColor(0, 0, 0, round(255 * shade)))
@@ -381,11 +382,11 @@ class MaskTransition(ShaderTransition):
     FRAGMENT = """
 uniform sampler2D mask;
 uniform float softness;
-void main() {
-    float m = texture(mask, uv).r;
+vec4 shade(vec2 p) {
+    float m = texture(mask, p).r;
     float a = softness <= 0.0 ? float(m < progress)
                               : clamp((progress * (1.0 + softness) - m) / softness, 0.0, 1.0);
-    color = mix(texture(old_tile, tile_uv(uv)), texture(new_tile, tile_uv(uv)), a);
+    return mix(texture(old_tile, tile_uv(p)), texture(new_tile, tile_uv(p)), a);
 }
 """
 
@@ -441,7 +442,7 @@ void main() {
         self._mask_texture = self._mask_texture_of = None
 
     def draw_fallback(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
-        old.draw(painter)
+        old.paint(painter)
         w, h = int(new.width), int(new.height)
         if progress <= 0.0 or w <= 0 or h <= 0:
             return
@@ -459,7 +460,7 @@ void main() {
         layer.fill(Qt.GlobalColor.transparent)
         layer_painter = QPainter(layer)
         layer_painter.translate(-x, 0)
-        new.draw(layer_painter)
+        new.paint(layer_painter)
         layer_painter.resetTransform()
         layer_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         layer_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
@@ -483,6 +484,7 @@ class TransitionConfig:
     star_points: int      # 3..12
     mask_shape: str       # "random" or a key of MASKS
     mask_softness: float  # 0..1; width of the mask's soft edge
+    use_shaders: bool = True  # False: shader transitions always use their QPainter fallback
 
 
 @section_config
@@ -505,6 +507,7 @@ def transition_config() -> TransitionConfig:
         star_points=min(12, max(3, section.get_number("star points", int))),
         mask_shape=shape,
         mask_softness=min(1.0, max(0.0, section.get_number("mask softness"))),
+        use_shaders=bool(section.get("use shaders", True)),
     )
 
 
@@ -532,6 +535,8 @@ class ActiveTransition:
 
     def update(self, now: float) -> bool:
         """Advance to `now`. Returns True once the transition has finished."""
+        # The old tile has left the strip, so its animated shaders are ticked from here
+        TileShaders.tick(self.old, now, centre_on_screen=True)
         self.progress = 1.0 if self.duration <= 0 else min(1.0, max(0.0, (now - self.start) / self.duration))
         return self.progress >= 1.0
 
@@ -548,7 +553,7 @@ def begin(new: Tile, old: Tile, now: float) -> None:
     finish(old)  # `old` may itself still be mid-transition
     effect = new_transition()
     if effect is None:
-        old.removed()
+        _discard(old)
         return
     new.transition = ActiveTransition(effect, old, now, transition_config().seconds)
 
@@ -559,12 +564,17 @@ def finish(tile: Tile) -> None:
     if active is not None:
         tile.transition = None
         active.effect.release()
-        active.old.removed()
+        _discard(active.old)
 
 
 def release(tile: Tile) -> None:
-    """Discard a tile for good: end its transition, then call removed()."""
+    """Discard a tile for good: end its transition, then free its shaders and call removed()."""
     finish(tile)
+    _discard(tile)
+
+
+def _discard(tile: Tile) -> None:
+    TileShaders.release(tile)
     tile.removed()
 
 
@@ -573,4 +583,4 @@ def draw_tile(painter: QPainter, tile: Tile) -> None:
     if tile.transition is not None:
         tile.transition.draw(painter, tile)
     else:
-        tile.draw(painter)
+        tile.paint(painter)

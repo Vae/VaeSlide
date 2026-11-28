@@ -147,6 +147,25 @@ class Settings(SettingsSection):
             # mask: "random" or one of: noise, linear, radial, clock, blinds
             "mask shape": "random",
             "mask softness": 0.15,  # mask: width of the soft edge, 0 (hard) .. 1
+            "use shaders": True,    # false: shader transitions (mask) use their QPainter version
+        },
+        # GPU effects on tiles (src/TileShaders.py); only on the "opengl" renderer.
+        # Each new tile rolls each enabled shader's chance; a tile can get several.
+        "tile shaders": {
+            "enabled": True,  # master switch for every tile shader
+            "hue rotate": {
+                "enabled": True,
+                "chance": 0.15,  # 0..1 chance per new tile
+                # [min, max] hue degrees per second, random direction; 0 = a fixed random hue shift
+                "degrees per second": [15.0, 45.0],
+            },
+            "water drop": {
+                "enabled": True,
+                "chance": 0.35,  # 0..1 chance per new tile
+                "seconds": 2.5,  # how long the ripples run; starts once the tile's centre is on screen
+                "strength": 0.03,    # wave height (max displacement) as a fraction of the tile's height
+                "wavelength": 0.06,  # distance between wave crests as a fraction of the tile's height
+            },
         },
     }
 

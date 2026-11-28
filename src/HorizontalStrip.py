@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from PySide6.QtGui import QPainter
 
-from src import Transitions
+from src import TileShaders, Transitions
 from src.AssetPicker import AssetPicker
 from src.Settings import get_settings, section_config
 from src.Tile import MetaTile, Tile, TileContext
@@ -90,7 +90,10 @@ class HorizontalStrip:
 
     def _create_tile(self, meta_tile: MetaTile, x: float) -> Optional[Tile]:
         # Returns immediately; images load on the asset_loader threads
-        return create_tile(meta_tile, x, self._height, self._ctx)
+        tile = create_tile(meta_tile, x, self._height, self._ctx)
+        if tile is not None:
+            TileShaders.assign(tile)
+        return tile
 
     # ------------------------------------------------------------------
     # Layout
@@ -184,6 +187,7 @@ class HorizontalStrip:
         now = time.monotonic()
         for tile in self._tiles:
             tile.tick(now, tile.right > 0 and tile.x < self._width)
+            TileShaders.tick(tile, now, 0.0 <= tile.x + tile.width / 2 <= self._width)
         self.swapper.update(self._tiles, self._width, now)
         for tile in self._tiles:
             if tile.transition is not None and tile.transition.update(now):

@@ -195,6 +195,10 @@ class TileVideo(Tile):
     def is_ready(self) -> bool:
         return self.scaled_img is not None and not self.scaled_img.isNull()
 
+    def content_key(self) -> object:
+        # A new QImage per decoded frame, so its key changes at the video's frame rate
+        return self.scaled_img.cacheKey() if self.scaled_img is not None else None
+
     def draw(self, painter: QPainter) -> None:
         if self.scaled_img is None or self.scaled_img.isNull():
             return

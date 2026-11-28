@@ -161,6 +161,9 @@ class TileImage(Tile):
         self._height = target_h
         self._request_pixmap()  # keep drawing the old pixmap, stretched, until it arrives
 
+    def content_key(self) -> object:
+        return self._pixmap.cacheKey() if self._pixmap is not None else None
+
     def draw(self, painter: QPainter) -> None:
         """Draw this tile image at position (x, y) on the given painter."""
         if self._pixmap is None:
