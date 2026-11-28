@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class LayerConfig:
     """
-    speed:   scroll speed of this layer in pixels per frame.
+    speed:   scroll speed of this layer in pixels per frame at 60 fps
+             (motion is time-based, so it's the same at any refresh rate).
     overlap: fraction of the screen height this layer overlaps the
              previous (further back) layer. Ignored for the first layer.
     """
@@ -77,8 +78,9 @@ class ScrollLayer:
         direction = -1.0 if self.config.speed < 0 else 1.0
         self.speed += amount * direction
 
-    def tick(self, speed_scale: float = 1.0) -> None:
-        self.layout.scroll(self.speed * speed_scale)
+    def tick(self, speed_scale: float = 1.0, frames: float = 1.0) -> None:
+        """Scroll by `frames` reference frames (1/60 s each; fractions allowed)."""
+        self.layout.scroll(self.speed * speed_scale * frames)
 
     def hit_test(self, x: float, y: float) -> Optional[Tile]:
         """Check if the given (x, y) coordinates are within any tile in this layer."""

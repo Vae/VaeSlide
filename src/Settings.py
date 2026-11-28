@@ -93,7 +93,8 @@ class Settings(SettingsSection):
         # QWidget. OpenGL falls back to raster when no GL context can be created.
         "renderer": "opengl",
         "opengl samples": 4,  # MSAA samples for the OpenGL renderer (0 = off); QPainter antialiasing needs them
-        # Parallax layers, back to front. speed is in px/frame; overlap is a
+        # Parallax layers, back to front. speed is in px per frame at 60 fps (motion is
+        # time-based, so it's the same at any refresh rate); overlap is a
         # fraction of screen height covered over the previous layer.
         "layers": [
             {"speed": 0.5, "overlap": 0.0},

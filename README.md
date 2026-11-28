@@ -16,6 +16,7 @@ A scrolling screensaver written in Python with PySide6. Images, videos and proce
 - An endless strip on each layer that fills and culls tiles in either direction
 - The mouse wheel speeds up or slows down the layer under the cursor; slowing past zero reverses it
 - A global speed multiplier, plus adjustable gaps (or overlaps) between tiles
+- Smooth, time-based motion synced to the display's refresh, so scrolling is the same speed at any refresh rate
 
 ### Tiles
 - **Images** from any number of folders, loaded and scaled on background threads so scrolling never stalls
@@ -150,7 +151,6 @@ $env:QT_QPA_PLATFORM='windows'; .venv\Scripts\python -m pytest
 - AI image generation for automated tile generation
 - Support for multiple monitors with independent scrolling
 - Ability to disable scrolling and compose a static scene
-- Smoother frame pacing by syncing the animation to the display's refresh
 
 ## License
 

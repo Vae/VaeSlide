@@ -28,6 +28,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from src import Diagnostics, GLSupport
 from src.AssetLoader import AssetLoader
 from src.AssetScanner import read_asset_sources
+from src.FrameClock import FrameClock, REFERENCE_FPS
 from src.ImageCache import ImageCache
 from src.MediaCache import MediaCache
 from src.ScrollLayer import ScrollLayer, LayerConfig, parse_layer_configs
@@ -57,27 +58,35 @@ class FrameStats:
         self._every = every_seconds
         self._window_start: Optional[float] = None  # set by the first frame
 
-    def record(self, paint_start: float, paint_end: float) -> None:
+    def record(self, paint_start: float, paint_end: float, late_frames: int = 0) -> None:
+        """late_frames: the FrameClock's running count of missed vsyncs."""
         if self._window_start is None:
-            self._start_window(paint_start)
+            self._start_window(paint_start, late_frames)
             return
         self._frames += 1
         paint = paint_end - paint_start
         self._paint_total += paint
         self._paint_max = max(self._paint_max, paint)
+        self._interval_max = max(self._interval_max, paint_start - self._last_start)
+        self._last_start = paint_start
         elapsed = paint_start - self._window_start
         if elapsed >= self._every:
             # Paint time is CPU time only; with OpenGL the GPU work finishes later, so fps matters more
-            logger.info("[%s] %.1f fps, paint avg %.2f ms, max %.2f ms",
+            logger.info("[%s] %.1f fps, paint avg %.2f ms, max %.2f ms, frame interval max %.1f ms, "
+                        "late frames %d",
                         self._label, self._frames / elapsed,
-                        1000 * self._paint_total / self._frames, 1000 * self._paint_max)
-            self._start_window(paint_start)
+                        1000 * self._paint_total / self._frames, 1000 * self._paint_max,
+                        1000 * self._interval_max, late_frames - self._late_at_start)
+            self._start_window(paint_start, late_frames)
 
-    def _start_window(self, now: float) -> None:
+    def _start_window(self, now: float, late_frames: int) -> None:
         self._window_start = now
+        self._last_start = now
+        self._late_at_start = late_frames
         self._frames = 0
         self._paint_total = 0.0
         self._paint_max = 0.0
+        self._interval_max = 0.0
 
 
 class ScrollWidgetMixin:
@@ -93,6 +102,7 @@ class ScrollWidgetMixin:
     """
 
     RENDERER = ""
+    VSYNCED = False  # whether frames are presented on vsync, so frame times can be snapped to it
 
     def __init__(self, fullscreen: bool, speed_scale: Optional[float] = None,
                  layers: Optional[List[LayerConfig]] = None, frame_stats: bool = False):
@@ -125,10 +135,13 @@ class ScrollWidgetMixin:
 
         self._configure_window()
 
-        # Animation timer (~60 fps)
+        # Animation is time-based: each frame advances by the time it will be on screen.
+        # What drives the frames differs per renderer; see _start_animation.
+        self._clock = FrameClock(snap=self.VSYNCED)
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start(16)
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.timeout.connect(self._on_timer)
+        self._start_animation()
 
         # Make the widget react to any input
         self.setMouseTracking(True)
@@ -184,11 +197,30 @@ class ScrollWidgetMixin:
     # ------------------------------------------------------------------
     # Animation loop
     # ------------------------------------------------------------------
-    def _tick(self) -> None:
+    def _refresh_period(self) -> float:
+        """Seconds per display refresh of the screen the window is on (60 Hz if unknown)."""
+        screen = self.screen()
+        rate = screen.refreshRate() if screen is not None else 0.0
+        return 1.0 / (rate if rate >= 20.0 else REFERENCE_FPS)
+
+    def _start_animation(self) -> None:
+        """Raster: a precise timer at the refresh rate. Not vsynced, so steps use real time."""
+        self._timer.start(max(1, round(1000 * self._refresh_period())))
+
+    def _on_timer(self) -> None:
+        self._advance()
+
+    def _advance(self) -> None:
+        """Step the animation by the time since the last frame and repaint."""
+        seconds = self._clock.advance(time.perf_counter(), self._refresh_period())
+        self._tick(seconds * REFERENCE_FPS)
+
+    def _tick(self, frames: float = 1.0) -> None:
+        """Advance everything by `frames` reference frames (1/60 s each) and repaint."""
         # Hand finished background loads to their tiles before moving anything
         self._asset_loader.process_completed()
         for layer in self._layers:
-            layer.tick(self._speed_scale)
+            layer.tick(self._speed_scale, frames)
         self.update()  # trigger repaint
 
     # ------------------------------------------------------------------
@@ -207,7 +239,7 @@ class ScrollWidgetMixin:
 
         painter.end()
         if self._frame_stats:
-            self._frame_stats.record(start, time.perf_counter())
+            self._frame_stats.record(start, time.perf_counter(), self._clock.late_frames)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Re-scale and re-flow every layer when the window is resized."""
@@ -314,14 +346,46 @@ class GLEndlessScrollWidget(ScrollWidgetMixin, QOpenGLWidget):
     """
 
     RENDERER = "opengl"
+    VSYNCED = True
+
+    # The frame loop runs off frameSwapped; this timer only restarts it if frames stop
+    # being presented (e.g. the window is hidden, so update() never paints)
+    WATCHDOG_MS = 100
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         surface_format = QSurfaceFormat.defaultFormat()
         surface_format.setSamples(max(0, get_settings().get_number("opengl samples", int)))
+        surface_format.setSwapInterval(1)  # vsync: the swap waits for the display, which paces the loop
         self.setFormat(surface_format)
         # paintGL draws the whole frame, so Qt needn't clear or keep the old one
         self.setUpdateBehavior(QOpenGLWidget.NoPartialUpdate)
+
+    def _start_animation(self) -> None:
+        """
+        One frame per display refresh: each presented frame (frameSwapped) steps the
+        animation and asks for the next paint. A fixed timer can't do this: a 16 ms
+        timer against a 16.7 ms refresh puts two steps into one refresh about once a
+        second, which shows as a hitch.
+        """
+        self.frameSwapped.connect(self._on_frame_swapped)
+        self._timer.start(self.WATCHDOG_MS)
+        self.update()
+
+    def _on_frame_swapped(self) -> None:
+        # If the driver ignores vsync, swaps return immediately; hold the loop back
+        # instead of spinning. Short enough not to matter when vsync works: the
+        # compositor can return a swap a few ms after the one before it.
+        period = self._refresh_period()
+        wait = 0.25 * period - self._clock.since_last(time.perf_counter())
+        if wait > 0:
+            QTimer.singleShot(max(1, round(1000 * wait)), self._advance)
+        else:
+            self._advance()
+
+    def _on_timer(self) -> None:
+        if self._clock.since_last(time.perf_counter()) * 1000 >= self.WATCHDOG_MS:
+            self._advance()
 
     def initializeGL(self) -> None:  # noqa: N802
         functions = self.context().functions()
