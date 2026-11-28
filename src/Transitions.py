@@ -21,6 +21,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPolygonF, QTransform
 
+from src import GLSupport
 from src.Settings import get_settings, section_config
 from src.Tile import Tile
 
@@ -57,6 +58,91 @@ class Transition:
         painter's state as it was (use save/restore).
         """
         raise NotImplementedError
+
+    def release(self) -> None:
+        """Called once when the transition ends; free per-swap resources (e.g. GL textures) here."""
+
+
+class ShaderTransition(Transition):
+    """
+    A transition computed by a GLSL fragment shader when painting on the
+    OpenGL renderer, with a QPainter fallback (draw_fallback) everywhere else.
+
+    The shader gets both tiles as textures and writes the blended,
+    premultiplied colour. Available inputs:
+
+        in vec2 uv;                 // 0..1 across the tile, (0, 0) at the top left
+        uniform sampler2D old_tile; // unit 0; sample with tile_uv(uv)
+        uniform sampler2D new_tile; // unit 1; sample with tile_uv(uv)
+        uniform float progress;     // 0..1
+        uniform vec2 size;          // tile size in device pixels
+        vec2 tile_uv(vec2 uv);      // flips uv for the tile textures (rendered upside down by GL)
+
+    FRAGMENT holds only the declarations and main() after that preamble.
+    Extra uniforms and textures (units 2+) come from set_uniforms() /
+    extra_textures().
+    """
+    FRAGMENT: ClassVar[str] = ""
+    PREAMBLE: ClassVar[str] = """#version 330
+in vec2 uv;
+out vec4 color;
+uniform sampler2D old_tile;
+uniform sampler2D new_tile;
+uniform float progress;
+uniform vec2 size;
+vec2 tile_uv(vec2 p) { return vec2(p.x, 1.0 - p.y); }
+"""
+
+    def __init__(self):
+        self._targets = None  # (old TileTarget, new TileTarget), made on the first GL draw
+
+    def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+        if not (GLSupport.is_gl_painter(painter) and self._draw_gl(painter, old, new, progress)):
+            self.draw_fallback(painter, old, new, progress)
+
+    def draw_fallback(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+        """The QPainter version, for the raster renderer. Defaults to a fade."""
+        FadeTransition().draw(painter, old, new, progress)
+
+    def set_uniforms(self, program, new: Tile, progress: float) -> None:
+        """Set this transition's own uniforms, including samplers for units 2+ (the program is bound)."""
+
+    def extra_textures(self, new: Tile) -> Tuple[int, ...]:
+        """Texture ids for units 2, 3, ... Create them lazily here (the context is current)."""
+        return ()
+
+    def _draw_gl(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> bool:
+        rect = tile_rect(new)
+        device_rect, scale, target = GLSupport.device_geometry(painter, rect)
+        if device_rect.width() < 1 or device_rect.height() < 1:
+            return True  # nothing visible to draw
+        program = GLSupport.shader_program(type(self).__name__, self.PREAMBLE + self.FRAGMENT)
+        if program is None:
+            return False
+        if self._targets is None:
+            self._targets = (GLSupport.TileTarget(), GLSupport.TileTarget())
+        old_target, new_target = self._targets
+        device_size = (round(device_rect.width()), round(device_rect.height()))
+        with GLSupport.native_painting(painter) as gl:
+            old_target.render(gl, old, rect, scale)
+            new_target.render(gl, new, rect, scale)
+            extra = self.extra_textures(new)
+            program.bind()
+            GLSupport.set_sampler(program, "old_tile", 0)
+            GLSupport.set_sampler(program, "new_tile", 1)
+            GLSupport.set_uniform(program, "progress", progress)
+            GLSupport.set_uniform(program, "size", *device_size)
+            self.set_uniforms(program, new, progress)
+            GLSupport.draw_quad(gl, program, device_rect, target,
+                                (old_target.texture_id, new_target.texture_id) + extra)
+            program.release()
+        return True
+
+    def release(self) -> None:
+        if self._targets is not None:
+            for target in self._targets:
+                target.release()
+            self._targets = None
 
 
 class FadeTransition(Transition):
@@ -276,10 +362,14 @@ def equalize(values: np.ndarray) -> np.ndarray:
     return (ranks / max(1, flat.size - 1)).reshape(values.shape)
 
 
-class MaskTransition(Transition):
+class MaskTransition(ShaderTransition):
     """
     Reveals the new tile through a grayscale mask (see MASKS): pixels whose
     mask value is below the progress show the new tile, with a soft edge.
+
+    On OpenGL the mask is uploaded once per swap as a float texture and the
+    shader does the per-pixel blend; elsewhere draw_fallback does it with
+    numpy and QImage composition.
     """
     NAME = "mask"
     # Masks are computed at most this many px on the long side and scaled up
@@ -287,8 +377,23 @@ class MaskTransition(Transition):
     # keeps large tiles cheap.
     MAX_MASK_SIZE = 320
 
+    # Same formula as alpha(), per pixel
+    FRAGMENT = """
+uniform sampler2D mask;
+uniform float softness;
+void main() {
+    float m = texture(mask, uv).r;
+    float a = softness <= 0.0 ? float(m < progress)
+                              : clamp((progress * (1.0 + softness) - m) / softness, 0.0, 1.0);
+    color = mix(texture(old_tile, tile_uv(uv)), texture(new_tile, tile_uv(uv)), a);
+}
+"""
+
     def __init__(self, shape: Optional[str] = None, softness: Optional[float] = None,
                  rng: Optional[random.Random] = None):
+        super().__init__()
+        self._mask_texture = None  # GL texture of self._mask, made on the first GL draw
+        self._mask_texture_of: Optional[np.ndarray] = None
         cfg = transition_config()
         self._rng = rng or random.Random()
         shape = shape or cfg.mask_shape
@@ -318,7 +423,24 @@ class MaskTransition(Transition):
         # Stretched so the soft edge starts fully outside at 0 and ends fully inside at 1
         return np.clip((progress * (1.0 + soft) - mask) / soft, 0.0, 1.0)
 
-    def draw(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
+    def extra_textures(self, new: Tile) -> Tuple[int, ...]:
+        mask = self.mask_for(int(new.width), int(new.height))
+        if self._mask_texture_of is not mask:  # first draw, or rebuilt for a new size
+            GLSupport.defer_delete(self._mask_texture)
+            self._mask_texture = GLSupport.float_texture(mask)
+            self._mask_texture_of = mask
+        return (self._mask_texture.textureId(),)
+
+    def set_uniforms(self, program, new: Tile, progress: float) -> None:
+        GLSupport.set_sampler(program, "mask", 2)
+        GLSupport.set_uniform(program, "softness", self.softness)
+
+    def release(self) -> None:
+        super().release()
+        GLSupport.defer_delete(self._mask_texture)
+        self._mask_texture = self._mask_texture_of = None
+
+    def draw_fallback(self, painter: QPainter, old: Tile, new: Tile, progress: float) -> None:
         old.draw(painter)
         w, h = int(new.width), int(new.height)
         if progress <= 0.0 or w <= 0 or h <= 0:
@@ -436,6 +558,7 @@ def finish(tile: Tile) -> None:
     active = tile.transition
     if active is not None:
         tile.transition = None
+        active.effect.release()
         active.old.removed()
 
 

@@ -89,6 +89,10 @@ class Settings(SettingsSection):
         "tile swap seconds": [8.0, 12.0],
         "tile swap edge margin": 100,  # px; tiles closer than this to a screen edge (or off it) aren't swapped
         "asset loader threads": 2,  # worker threads that decode and scale images (minimum 1)
+        # "opengl" paints through a QOpenGLWidget (needed for shaders); "raster" uses a plain
+        # QWidget. OpenGL falls back to raster when no GL context can be created.
+        "renderer": "opengl",
+        "opengl samples": 4,  # MSAA samples for the OpenGL renderer (0 = off); QPainter antialiasing needs them
         # Parallax layers, back to front. speed is in px/frame; overlap is a
         # fraction of screen height covered over the previous layer.
         "layers": [

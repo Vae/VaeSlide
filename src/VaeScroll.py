@@ -16,14 +16,16 @@ import logging
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtGui import QPainter, QColor, QSurfaceFormat
+from PySide6.QtGui import QPainter, QColor, QSurfaceFormat, QOffscreenSurface, QOpenGLContext
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from src import Diagnostics
+from src import Diagnostics, GLSupport
 from src.AssetLoader import AssetLoader
 from src.AssetScanner import read_asset_sources
 from src.ImageCache import ImageCache
@@ -35,6 +37,9 @@ from src.TileTypes import TILE_TYPES
 
 logger = logging.getLogger(__name__)
 
+# glGetString names (PySide6 has no GL enum constants without PyOpenGL)
+GL_VENDOR, GL_RENDERER, GL_VERSION = 0x1F00, 0x1F01, 0x1F02
+
 def load_layer_configs() -> List[LayerConfig]:
     """Layer configs from settings.json, falling back to the built-in defaults."""
     configs = parse_layer_configs(get_settings().get("layers"))
@@ -44,18 +49,55 @@ def load_layer_configs() -> List[LayerConfig]:
     return configs
 
 
-class EndlessScrollWidget(QWidget):
+class FrameStats:
+    """Logs the average frame interval and paint time every few seconds (--frame-stats)."""
+
+    def __init__(self, label: str, every_seconds: float = 5.0):
+        self._label = label
+        self._every = every_seconds
+        self._window_start: Optional[float] = None  # set by the first frame
+
+    def record(self, paint_start: float, paint_end: float) -> None:
+        if self._window_start is None:
+            self._start_window(paint_start)
+            return
+        self._frames += 1
+        paint = paint_end - paint_start
+        self._paint_total += paint
+        self._paint_max = max(self._paint_max, paint)
+        elapsed = paint_start - self._window_start
+        if elapsed >= self._every:
+            # Paint time is CPU time only; with OpenGL the GPU work finishes later, so fps matters more
+            logger.info("[%s] %.1f fps, paint avg %.2f ms, max %.2f ms",
+                        self._label, self._frames / elapsed,
+                        1000 * self._paint_total / self._frames, 1000 * self._paint_max)
+            self._start_window(paint_start)
+
+    def _start_window(self, now: float) -> None:
+        self._window_start = now
+        self._frames = 0
+        self._paint_total = 0.0
+        self._paint_max = 0.0
+
+
+class ScrollWidgetMixin:
     """
-    The main screensaver widget.
+    The main screensaver widget's behaviour, shared by the raster and OpenGL widgets.
 
     Draws several horizontally scrolling layers at different speeds to
     create a parallax effect. Each layer has its own tiles and overlaps
     the previous layer by a percentage of the screen height.
+
+    Must come before the Qt base class, e.g. ``class X(ScrollWidgetMixin, QWidget)``.
+    Subclasses call ``_paint_scene(painter)`` from their own paint hook.
     """
 
+    RENDERER = ""
+
     def __init__(self, fullscreen: bool, speed_scale: Optional[float] = None,
-                 layers: Optional[List[LayerConfig]] = None):
+                 layers: Optional[List[LayerConfig]] = None, frame_stats: bool = False):
         super().__init__()
+        self._frame_stats = FrameStats(self.RENDERER) if frame_stats else None
 
         self._fullscreen = fullscreen
         self._settings = get_settings()
@@ -152,7 +194,9 @@ class EndlessScrollWidget(QWidget):
     # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+    def _paint_scene(self) -> None:
+        """Paint every layer onto this widget; called from the subclass's paint hook."""
+        start = time.perf_counter()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         painter.fillRect(self.rect(), self._bg_color)
@@ -162,6 +206,8 @@ class EndlessScrollWidget(QWidget):
             layer.draw(painter)
 
         painter.end()
+        if self._frame_stats:
+            self._frame_stats.record(start, time.perf_counter())
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Re-scale and re-flow every layer when the window is resized."""
@@ -251,6 +297,71 @@ class EndlessScrollWidget(QWidget):
                 self.load_assets(tile_type)
 
 
+class EndlessScrollWidget(ScrollWidgetMixin, QWidget):
+    """Raster renderer: QPainter on a plain QWidget, all on the CPU."""
+
+    RENDERER = "raster"
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        self._paint_scene()
+
+
+class GLEndlessScrollWidget(ScrollWidgetMixin, QOpenGLWidget):
+    """
+    OpenGL renderer: the same QPainter drawing, but through Qt's OpenGL paint
+    engine on a QOpenGLWidget. Raw GL (shaders) can be mixed in between
+    painter.beginNativePainting() and endNativePainting().
+    """
+
+    RENDERER = "opengl"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        surface_format = QSurfaceFormat.defaultFormat()
+        surface_format.setSamples(max(0, get_settings().get_number("opengl samples", int)))
+        self.setFormat(surface_format)
+        # paintGL draws the whole frame, so Qt needn't clear or keep the old one
+        self.setUpdateBehavior(QOpenGLWidget.NoPartialUpdate)
+
+    def initializeGL(self) -> None:  # noqa: N802
+        functions = self.context().functions()
+        logger.info("OpenGL renderer: %s | %s | %s",
+                    functions.glGetString(GL_VENDOR), functions.glGetString(GL_RENDERER),
+                    functions.glGetString(GL_VERSION))
+
+    def paintGL(self) -> None:  # noqa: N802
+        GLSupport.collect_garbage()  # GL objects released since the last frame (context is current now)
+        self._paint_scene()
+
+
+def opengl_available() -> bool:
+    """True when this platform can create an OpenGL context (False e.g. under QT_QPA_PLATFORM=offscreen)."""
+    surface = QOffscreenSurface()
+    surface.create()
+    context = QOpenGLContext()
+    ok = context.create() and context.makeCurrent(surface)
+    if ok:
+        context.doneCurrent()
+    return ok
+
+
+def create_widget(renderer: Optional[str] = None, **kwargs) -> ScrollWidgetMixin:
+    """
+    Build the widget for `renderer` ("opengl" or "raster"; default: the "renderer"
+    setting). OpenGL falls back to raster when no context can be created.
+    """
+    renderer = (renderer or get_settings().get("renderer") or "opengl").lower()
+    if renderer not in ("opengl", "raster"):
+        logger.error("Unknown renderer %r (known: opengl, raster); using opengl.", renderer)
+        renderer = "opengl"
+    if renderer == "opengl" and not opengl_available():
+        logger.warning("OpenGL is not available; falling back to the raster renderer.")
+        renderer = "raster"
+    cls = GLEndlessScrollWidget if renderer == "opengl" else EndlessScrollWidget
+    logger.info("Using the %s renderer.", renderer)
+    return cls(**kwargs)
+
+
 # ======================================================================
 # Entry point
 # ======================================================================
@@ -262,6 +373,10 @@ def main() -> None:
                         help="Run in a window instead of fullscreen (for testing)")
     parser.add_argument("--speed", type=float, default=None,
                         help="Override \"global speed\" from settings.json (multiplier on every layer's speed)")
+    parser.add_argument("--renderer", choices=("opengl", "raster"), default=None,
+                        help="Override \"renderer\" from settings.json")
+    parser.add_argument("--frame-stats", action="store_true",
+                        help="Log fps and paint time every few seconds")
     args = parser.parse_args()
 
     fullscreen = not args.window
@@ -277,7 +392,8 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
 
-    widget = EndlessScrollWidget(fullscreen=fullscreen, speed_scale=args.speed)
+    widget = create_widget(args.renderer, fullscreen=fullscreen, speed_scale=args.speed,
+                           frame_stats=args.frame_stats)
 
     # Asset folders from assets.json (missing and "#"-disabled folders are skipped)
     for tile_type, path in read_asset_sources():
